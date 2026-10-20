@@ -1,7 +1,7 @@
 # Flux
 
 An offline presentation editor for Linux, built with C++20 and Qt Quick/QML.
-This is **version 0.1**, a working foundation with real editing, object-based
+This is **version 0.1.1**, a working foundation with real editing, object-based
 Morph, curved motion paths, technical content, and a presenter window.
 
 ## Build and install on Fedora
@@ -42,6 +42,11 @@ CMake. On Wayland, install the Qt Wayland platform plugin. X11 works too.
 
 The bundled `examples/A-little-motion.flux` is an editable copy of the example deck.
 
+To update an existing installation, close Flux, extract this source into a
+fresh directory, and run `bash packaging/install-fedora.sh` from its `flux`
+directory. Your saved `.flux` presentations remain compatible. The installer
+updates the executable in `~/.local`; it does not remove your project files.
+
 ![Native editor](docs/editor.png)
 
 ## Try it in two minutes
@@ -63,6 +68,8 @@ The bundled `examples/A-little-motion.flux` is an editable copy of the example d
 | Area | Current behavior |
 |---|---|
 | Editing | Drag, resize, Shift-constrained resize, numeric geometry and rotation, keyboard nudge, color, opacity, text size/weight/alignment, layers, alignment, duplicate/delete |
+| Context menus | Right-click objects, slide thumbnails, or empty canvas; keyboard Menu / Shift+F10 also opens the relevant menu |
+| Clipboard | Cut/copy/paste a single native object, including embedded images, across slides or Flux windows; paste external plain text as a text box |
 | Slide management | Add, duplicate, delete, reorder; 6 layouts including a blank canvas |
 | Morph | Stable IDs, position/size/rotation/color/opacity interpolation, text/content crossfades, appearing/disappearing objects |
 | Paths | Straight, curved arc, cubic Bézier; smooth, linear, and ease-out timing |
@@ -72,6 +79,31 @@ The bundled `examples/A-little-motion.flux` is an editable copy of the example d
 | Presenting | Fullscreen audience view, speaker notes, next-slide preview, timer, blackout; automatic second-display selection |
 | Files | Versioned JSON `.flux`, embedded PNG assets, atomic saves, debounced recovery, 80-step undo/redo |
 | Export | Static vector/text PDF with embedded raster images |
+
+## Right-click editing
+
+| Where | Available actions |
+|---|---|
+| Object | Edit content/data, cut/copy/paste, duplicate/delete, arrange layers, align to slide, format, motion settings, break a previous-slide Morph match |
+| Empty canvas or workspace | Paste here, insert text/shapes/code/equations/charts/tables or import an image, undo/redo, toggle grid and snap, slide settings, notes |
+| Slide thumbnail | New blank slide, duplicate, rename, move earlier/later, notes, present from here, delete |
+
+Right-clicking selects the object or slide under the pointer before showing
+its menu. Insertion and **Paste here** use slide coordinates at the click,
+adjusted to keep the new object's bounds on the slide; imported images start
+centered. Creation and placement undo together. Escape dismisses a menu.
+Use **Shift+F10** or the keyboard **Menu** key with the canvas focused, or on a
+thumbnail reached with Tab.
+
+**Ctrl+X / Ctrl+C / Ctrl+V** operate on objects while the canvas has focus.
+Text fields keep their normal text clipboard shortcuts. Native clipboard
+copies preserve styling, content, embedded images, and motion settings.
+Every paste gets a fresh object identity; duplicate a **slide** when you want
+to preserve identities for Morph. Clipboard image data from other applications
+is not supported yet; use **Insert → Image** instead.
+
+The menu screenshot is in [docs/context-menu.png](docs/context-menu.png).
+See [CHANGELOG.md](CHANGELOG.md) for the patch and next milestones.
 
 ## Important boundaries in 0.1
 

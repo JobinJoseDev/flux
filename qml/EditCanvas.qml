@@ -10,6 +10,8 @@ Item {
     property bool guideY: false
     signal editContent
     signal removeRequested
+    signal objectContextRequested(real x, real y)
+    signal canvasContextRequested(real x, real y, real slideX, real slideY)
     property real canvasScale: Math.min((width - 72) / 1280, (height - 64) / 720)
     function snapped(v) {
         return snap ? Math.round(v / 8) * 8 : Math.round(v);
@@ -22,10 +24,29 @@ Item {
             y: deck.selected.y + dy
         });
     }
+    function openKeyboardMenu() {
+        if (deck.selectedId) {
+            var point = paper.mapToItem(editor, deck.selected.x + deck.selected.w / 2, deck.selected.y + deck.selected.h / 2);
+            objectContextRequested(point.x, point.y);
+        } else {
+            var center = paper.mapToItem(editor, 640, 360);
+            canvasContextRequested(center.x, center.y, 640, 360);
+        }
+    }
+    function openCanvasMenu(area, x, y) {
+        deck.select("");
+        editor.forceActiveFocus();
+        var point = area.mapToItem(editor, x, y);
+        var position = area.mapToItem(paper, x, y);
+        canvasContextRequested(point.x, point.y, snapped(position.x), snapped(position.y));
+    }
     focus: true
     Keys.onPressed: function (event) {
         var step = event.modifiers & Qt.ShiftModifier ? 10 : 1;
-        if (event.key === Qt.Key_Left) {
+        if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+            openKeyboardMenu();
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Left) {
             nudge(-step, 0);
             event.accepted = true;
         } else if (event.key === Qt.Key_Right) {
@@ -45,8 +66,21 @@ Item {
             event.accepted = true;
         }
     }
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: function (mouse) {
+            if (mouse.button === Qt.RightButton)
+                editor.openCanvasMenu(this, mouse.x, mouse.y);
+            else {
+                deck.select("");
+                editor.forceActiveFocus();
+            }
+        }
+    }
     Rectangle {
         id: paper
+        objectName: "slidePaper"
         width: 1280
         height: 720
         x: (editor.width - 1280 * editor.canvasScale) / 2
@@ -64,9 +98,14 @@ Item {
         }
         MouseArea {
             anchors.fill: parent
-            onClicked: {
-                deck.select("");
-                editor.forceActiveFocus();
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onClicked: function (mouse) {
+                if (mouse.button === Qt.RightButton)
+                    editor.openCanvasMenu(this, mouse.x, mouse.y);
+                else {
+                    deck.select("");
+                    editor.forceActiveFocus();
+                }
             }
         }
         Canvas {
@@ -108,7 +147,8 @@ Item {
                 MouseArea {
                     id: mover
                     anchors.fill: parent
-                    cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    cursorShape: (pressedButtons & Qt.LeftButton) ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                     property point pressAt
                     onPressed: function (mouse) {
                         editor.forceActiveFocus();
@@ -116,7 +156,7 @@ Item {
                         pressAt = mapToItem(paper, mouse.x, mouse.y);
                     }
                     onPositionChanged: function (mouse) {
-                        if (!pressed)
+                        if (!(pressedButtons & Qt.LeftButton))
                             return;
                         var p = mapToItem(paper, mouse.x, mouse.y);
                         var nx = editor.snapped(item.modelData.x + p.x - pressAt.x);
@@ -130,7 +170,9 @@ Item {
                         item.dx = nx - item.modelData.x;
                         item.dy = ny - item.modelData.y;
                     }
-                    onReleased: {
+                    onReleased: function (mouse) {
+                        if (mouse.button !== Qt.LeftButton)
+                            return;
                         editor.guideX = false;
                         editor.guideY = false;
                         if (item.dx !== 0 || item.dy !== 0)
@@ -139,13 +181,22 @@ Item {
                                 y: item.y
                             });
                     }
+                    onClicked: function (mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            var point = mapToItem(editor, mouse.x, mouse.y);
+                            editor.objectContextRequested(point.x, point.y);
+                        }
+                    }
                     onCanceled: {
                         item.dx = 0;
                         item.dy = 0;
                         editor.guideX = false;
                         editor.guideY = false;
                     }
-                    onDoubleClicked: editor.editContent()
+                    onDoubleClicked: function (mouse) {
+                        if (mouse.button === Qt.LeftButton)
+                            editor.editContent();
+                    }
                 }
                 Rectangle {
                     anchors.fill: parent

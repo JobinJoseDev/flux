@@ -1,4 +1,4 @@
-# Verification for Flux 0.1
+# Verification for Flux 0.1.1
 
 ## Environment
 
@@ -17,9 +17,10 @@ included in the source bundle and are not runtime services used by Flux.
 |---|---|
 | C++ and QML compilation | Release executable built successfully; actual ELF header and nonzero binary size verified |
 | Motion tests | Endpoint and midpoint interpolation, geometry, shortest rotation, color/opacity, cubic controls, easing, delay/duration boundaries and non-finite progress |
-| Document tests | Stable identity across slide duplication; undo/redo; unlinking; save/reopen equivalence; invalid-file rejection without replacing the active deck; failed-save behavior; embedded image portability; PDF generation; entrance tracks; geometry bounds |
-| Native UI integration | Real pointer events drag an object and click the timeline; the first scrub preserves its requested position; content and notes dialogs commit; the audience window opens and advances; zero QML runtime warnings |
+| Document tests | Stable identity across slide duplication; undo/redo; unlinking; save/reopen equivalence; invalid-file rejection without replacing the active deck; failed-save behavior; embedded image portability; PDF generation; entrance tracks; geometry bounds; clipboard identity/content/image preservation; cut and paste undo; malformed clipboard rejection; plain-text paste; single-step positional insertion |
+| Native UI integration | Real pointer events drag an object and click the timeline; the first scrub preserves its requested position; object/canvas/thumbnail right-click menus open on the correct target; actual menu clicks copy/paste and duplicate slides; Shift+F10 and Escape work; keyboard nudge works after dismissal; content and notes dialogs commit; the audience window opens and advances; zero QML runtime warnings |
 | Visual editor check | Actual native framebuffer inspected at 1440 × 960; included as `docs/editor.png` |
+| Context-menu visual check | Actual menu framebuffer inspected; included as `docs/context-menu.png` |
 | PDF inspection | Exported the five-slide example, confirmed five pages, rendered every page with Poppler, and visually inspected text, code, chart, formula, and geometry |
 | Installer and metadata | Fedora install script passes `bash -n`; desktop MIME/AppStream XML parses |
 

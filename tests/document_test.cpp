@@ -1,8 +1,10 @@
 #include "Document.hpp"
+#include <QClipboard>
 #include <QFile>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMimeData>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -98,7 +100,11 @@ class DocumentTest : public QObject {
         d.newDeck(false);
         QVERIFY(d.importImage(QUrl::fromLocalFile(path)));
         QVERIFY(d.selected()["source"].toString().startsWith("data:image/png;base64,"));
+        const auto embedded = d.selected()["source"];
         QFile::remove(path);
+        QVERIFY(d.copyObject());
+        QVERIFY(d.pasteObjectAt(40, 40));
+        QCOMPARE(d.selected()["source"], embedded);
         for (auto kind : {"code", "equation", "chart", "table", "arrow"})
             d.addObject(kind);
         auto pdf = QUrl::fromLocalFile(tmp.filePath("deck.pdf"));
@@ -131,6 +137,90 @@ class DocumentTest : public QObject {
         d.undo();
         QCOMPARE(d.selectedId(), id);
         d.cleanupRecovery();
+    }
+    void clipboardAndInsertion() {
+        Document d;
+        d.newDeck(false);
+        const auto beforeInsert = d.json();
+        d.addObjectAt("code", 1200, 700);
+        QCOMPARE(d.selected()["x"].toDouble(), 640.);
+        QCOMPARE(d.selected()["y"].toDouble(), 420.);
+        d.undo();
+        QCOMPARE(d.json(), beforeInsert); // Placement and creation are one undo step.
+        d.redo();
+        d.updateObject(
+            d.selectedId(),
+            {{"text", "const int answer = 42;"}, {"path", "bezier"}, {"c1x", 500.}, {"c1y", 250.}});
+        const auto original = d.selected();
+        const auto originalId = d.selectedId();
+        const auto beforeCopy = d.json();
+        QVERIFY(d.copyObject());
+        QVERIFY(d.canPaste());
+        QCOMPARE(d.json(), beforeCopy);
+        QCOMPARE(QGuiApplication::clipboard()->text(), original["text"].toString());
+        d.addSlide("blank");
+        const auto beforePaste = d.json();
+        QVERIFY(d.pasteObjectAt(120, 100));
+        QVERIFY(d.selectedId() != originalId);
+        QCOMPARE(d.selected()["text"], original["text"]);
+        QCOMPARE(d.selected()["kind"], original["kind"]);
+        QCOMPARE(d.selected()["x"].toDouble(), 120.);
+        QCOMPARE(d.selected()["y"].toDouble(), 100.);
+        QCOMPARE(d.selected()["c1x"].toDouble(), -20.);
+        QCOMPARE(d.selected()["c1y"].toDouble(), -70.);
+        d.undo();
+        QCOMPARE(d.json(), beforePaste);
+        d.redo();
+        const auto pastedId = d.selectedId();
+        const auto beforeCut = d.json();
+        d.cutObject();
+        QVERIFY(d.objects().isEmpty());
+        d.undo();
+        QCOMPARE(d.json(), beforeCut);
+        QCOMPARE(d.selectedId(), pastedId);
+        QVERIFY(d.pasteObject());
+        QCOMPARE(d.selected()["x"].toDouble(), 144.);
+        QVERIFY(d.selectedId() != pastedId);
+        QVERIFY(d.pasteObject());
+        QCOMPARE(d.selected()["x"].toDouble(), 168.);
+        d.cleanupRecovery();
+    }
+    void clipboardValidationAndText() {
+        Document d;
+        d.newDeck(false);
+        auto clipboard = QGuiApplication::clipboard();
+        clipboard->clear();
+        QVERIFY(!d.canPaste());
+        const auto before = d.json();
+        auto malformed = new QMimeData;
+        malformed->setData("application/x-flux-object+json", "{broken");
+        clipboard->setMimeData(malformed);
+        QVERIFY(!d.pasteObject());
+        QCOMPARE(d.json(), before);
+        QVERIFY(!d.canUndo());
+        d.addObject("rect");
+        auto invalid = QJsonObject::fromVariantMap(d.selected());
+        invalid["kind"] = "unknown";
+        auto unsupported = new QMimeData;
+        unsupported->setData(
+            "application/x-flux-object+json",
+            QJsonDocument(
+                QJsonObject{{"format", "flux-object"}, {"version", 1}, {"object", invalid}})
+                .toJson());
+        clipboard->setMimeData(unsupported);
+        const auto beforeInvalid = d.json();
+        QVERIFY(!d.pasteObject());
+        QCOMPARE(d.json(), beforeInvalid);
+        clipboard->setText("A pasted idea\nSecond line");
+        QVERIFY(d.pasteObjectAt(80, 90));
+        QCOMPARE(d.selected()["kind"].toString(), QString("text"));
+        QCOMPARE(d.selected()["text"].toString(), QString("A pasted idea\nSecond line"));
+        const auto beforeLong = d.json();
+        clipboard->setText(QString(12001, 'a'));
+        QVERIFY(!d.pasteObject());
+        QCOMPARE(d.json(), beforeLong);
+        d.cleanupRecovery();
+        clipboard->clear();
     }
 };
 QTEST_MAIN(DocumentTest)

@@ -27,6 +27,9 @@ ApplicationWindow {
     palette.dark: "#101a22"
     palette.light: "#405966"
     palette.placeholderText: "#738b9e"
+    palette.disabled.text: "#6c8292"
+    palette.disabled.buttonText: "#6c8292"
+    palette.disabled.windowText: "#6c8292"
     property bool previewing: false
     property real previewProgress: 0
     property var previewTracks: []
@@ -99,6 +102,18 @@ ApplicationWindow {
         if (Qt.application.screens.length > 1)
             presenter.start();
     }
+    function renameSlide() {
+        slideNameEdit.text = deck.currentSlide.name || "";
+        renameSlideDialog.open();
+        slideNameEdit.forceActiveFocus();
+        slideNameEdit.selectAll();
+    }
+    function showSlideMenu(item, index, x, y) {
+        stopPreview();
+        deck.slideIndex = index;
+        item.forceActiveFocus();
+        slideContextMenu.popup(item, x, y);
+    }
     onClosing: function (close) {
         if (!allowClose) {
             close.accepted = false;
@@ -150,6 +165,21 @@ ApplicationWindow {
         sequence: "Ctrl+D"
         enabled: editor.activeFocus
         onActivated: deck.selectedId ? deck.duplicateObject() : deck.duplicateSlide()
+    }
+    Shortcut {
+        sequence: "Ctrl+X"
+        enabled: editor.activeFocus && !!deck.selectedId
+        onActivated: deck.cutObject()
+    }
+    Shortcut {
+        sequence: "Ctrl+C"
+        enabled: editor.activeFocus && !!deck.selectedId
+        onActivated: deck.copyObject()
+    }
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: editor.activeFocus
+        onActivated: deck.pasteObject()
     }
     Shortcut {
         sequence: "Ctrl+Shift+D"
@@ -420,10 +450,19 @@ ApplicationWindow {
                         currentIndex: deck.slideIndex
                         ScrollBar.vertical: ScrollBar {}
                         delegate: Item {
+                            id: slideThumbnail
+                            objectName: "slideThumbnail-" + index
                             required property var modelData
                             required property int index
+                            activeFocusOnTab: true
                             width: filmstrip.width
                             height: 125
+                            Keys.onPressed: function (event) {
+                                if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                                    app.showSlideMenu(slideThumbnail, index, width / 2, 50);
+                                    event.accepted = true;
+                                }
+                            }
                             Rectangle {
                                 x: 3
                                 y: 2
@@ -455,10 +494,15 @@ ApplicationWindow {
                             }
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: {
-                                    app.stopPreview();
-                                    deck.slideIndex = index;
-                                    editor.forceActiveFocus();
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function (mouse) {
+                                    if (mouse.button === Qt.RightButton)
+                                        app.showSlideMenu(slideThumbnail, index, mouse.x, mouse.y);
+                                    else {
+                                        app.stopPreview();
+                                        deck.slideIndex = index;
+                                        editor.forceActiveFocus();
+                                    }
                                 }
                             }
                         }
@@ -542,6 +586,14 @@ ApplicationWindow {
                         visible: !app.previewing
                         onEditContent: app.editObject()
                         onRemoveRequested: deck.deleteObject()
+                        onObjectContextRequested: function (x, y) {
+                            objectContextMenu.popup(editor, x, y);
+                        }
+                        onCanvasContextRequested: function (x, y, slideX, slideY) {
+                            canvasContextMenu.slideX = slideX;
+                            canvasContextMenu.slideY = slideY;
+                            canvasContextMenu.popup(editor, x, y);
+                        }
                     }
                     Item {
                         anchors.fill: parent
@@ -691,6 +743,259 @@ ApplicationWindow {
         }
     }
 
+    Action {
+        id: cutObjectAction
+        text: "Cut    Ctrl+X"
+        enabled: !!deck.selectedId
+        onTriggered: deck.cutObject()
+    }
+    Action {
+        id: copyObjectAction
+        text: "Copy    Ctrl+C"
+        enabled: !!deck.selectedId
+        onTriggered: deck.copyObject()
+    }
+    Action {
+        id: duplicateObjectAction
+        text: "Duplicate    Ctrl+D"
+        enabled: !!deck.selectedId && deck.objects.length < 250
+        onTriggered: deck.duplicateObject()
+    }
+    Action {
+        id: deleteObjectAction
+        text: "Delete    Del"
+        enabled: !!deck.selectedId
+        onTriggered: deck.deleteObject()
+    }
+    Menu {
+        id: objectContextMenu
+        objectName: "objectContextMenu"
+        width: 250
+        property int selectedLayer: {
+            for (var i = 0; i < deck.objects.length; ++i)
+                if (deck.objects[i].id === deck.selectedId)
+                    return i;
+            return -1;
+        }
+        MenuItem {
+            text: ["chart", "table"].indexOf(deck.selected.kind) >= 0 ? "Edit data…" : "Edit content…"
+            enabled: ["text", "code", "equation", "chart", "table"].indexOf(deck.selected.kind) >= 0
+            onTriggered: app.editObject()
+        }
+        MenuSeparator {}
+        MenuItem {
+            action: cutObjectAction
+        }
+        MenuItem {
+            objectName: "contextCopyObject"
+            action: copyObjectAction
+        }
+        MenuItem {
+            text: "Paste    Ctrl+V"
+            enabled: deck.canPaste && deck.objects.length < 250
+            onTriggered: deck.pasteObject()
+        }
+        MenuItem {
+            objectName: "contextDuplicateObject"
+            action: duplicateObjectAction
+        }
+        MenuSeparator {}
+        Menu {
+            title: "Arrange"
+            MenuItem {
+                text: "Bring to front"
+                enabled: objectContextMenu.selectedLayer < deck.objects.length - 1
+                onTriggered: deck.layerObject(250)
+            }
+            MenuItem {
+                text: "Bring forward"
+                enabled: objectContextMenu.selectedLayer < deck.objects.length - 1
+                onTriggered: deck.layerObject(1)
+            }
+            MenuItem {
+                text: "Send backward"
+                enabled: objectContextMenu.selectedLayer > 0
+                onTriggered: deck.layerObject(-1)
+            }
+            MenuItem {
+                text: "Send to back"
+                enabled: objectContextMenu.selectedLayer > 0
+                onTriggered: deck.layerObject(-250)
+            }
+        }
+        Menu {
+            title: "Align to slide"
+            MenuItem {
+                text: "Left margin"
+                onTriggered: deck.alignObject("left")
+            }
+            MenuItem {
+                text: "Horizontal center"
+                onTriggered: deck.alignObject("center")
+            }
+            MenuItem {
+                text: "Right margin"
+                onTriggered: deck.alignObject("right")
+            }
+            MenuItem {
+                text: "Vertical center"
+                onTriggered: deck.alignObject("middle")
+            }
+        }
+        MenuItem {
+            text: "Format object"
+            onTriggered: inspector.tab = 0
+        }
+        MenuItem {
+            text: "Motion settings"
+            onTriggered: inspector.tab = 1
+        }
+        MenuItem {
+            text: "Break Morph match"
+            enabled: inspector.matched
+            onTriggered: deck.unlinkObject()
+        }
+        MenuSeparator {}
+        MenuItem {
+            action: deleteObjectAction
+        }
+    }
+    Menu {
+        id: canvasContextMenu
+        objectName: "canvasContextMenu"
+        width: 240
+        property real slideX: 160
+        property real slideY: 180
+        function insert(kind) {
+            deck.addObjectAt(kind, slideX, slideY);
+        }
+        MenuItem {
+            objectName: "contextPasteHere"
+            text: "Paste here"
+            enabled: deck.canPaste && deck.objects.length < 250
+            onTriggered: deck.pasteObjectAt(canvasContextMenu.slideX, canvasContextMenu.slideY)
+        }
+        Menu {
+            title: "Insert"
+            enabled: deck.objects.length < 250
+            MenuItem {
+                text: "Text"
+                onTriggered: canvasContextMenu.insert("text")
+            }
+            MenuItem {
+                text: "Rectangle"
+                onTriggered: canvasContextMenu.insert("rect")
+            }
+            MenuItem {
+                text: "Circle / ellipse"
+                onTriggered: canvasContextMenu.insert("ellipse")
+            }
+            MenuItem {
+                text: "Arrow"
+                onTriggered: canvasContextMenu.insert("arrow")
+            }
+            MenuSeparator {}
+            MenuItem {
+                text: "Code block"
+                onTriggered: canvasContextMenu.insert("code")
+            }
+            MenuItem {
+                text: "Equation"
+                onTriggered: canvasContextMenu.insert("equation")
+            }
+            MenuItem {
+                text: "Chart"
+                onTriggered: canvasContextMenu.insert("chart")
+            }
+            MenuItem {
+                text: "Table"
+                onTriggered: canvasContextMenu.insert("table")
+            }
+            MenuItem {
+                text: "Image…"
+                onTriggered: imageDialog.open()
+            }
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Undo    Ctrl+Z"
+            enabled: deck.canUndo
+            onTriggered: deck.undo()
+        }
+        MenuItem {
+            text: "Redo    Ctrl+Shift+Z"
+            enabled: deck.canRedo
+            onTriggered: deck.redo()
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Show grid"
+            checkable: true
+            checked: editor.showGrid
+            onTriggered: editor.showGrid = !editor.showGrid
+        }
+        MenuItem {
+            text: "Snap to grid"
+            checkable: true
+            checked: editor.snap
+            onTriggered: editor.snap = !editor.snap
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Slide settings"
+            onTriggered: inspector.tab = 0
+        }
+        MenuItem {
+            text: "Presenter notes…"
+            onTriggered: app.editNotes()
+        }
+    }
+    Menu {
+        id: slideContextMenu
+        objectName: "slideContextMenu"
+        width: 260
+        MenuItem {
+            text: "New blank slide"
+            enabled: deck.slides.length < 200
+            onTriggered: deck.addSlide("blank")
+        }
+        MenuItem {
+            objectName: "contextDuplicateSlide"
+            text: "Duplicate slide    Ctrl+Shift+D"
+            enabled: deck.slides.length < 200
+            onTriggered: deck.duplicateSlide()
+        }
+        MenuItem {
+            text: "Rename slide…"
+            onTriggered: app.renameSlide()
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Move earlier"
+            enabled: deck.slideIndex > 0
+            onTriggered: deck.moveSlide(-1)
+        }
+        MenuItem {
+            text: "Move later"
+            enabled: deck.slideIndex < deck.slides.length - 1
+            onTriggered: deck.moveSlide(1)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Presenter notes…"
+            onTriggered: app.editNotes()
+        }
+        MenuItem {
+            text: "Present from here    Shift+F5"
+            onTriggered: app.present(true)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "Delete slide…"
+            enabled: deck.slides.length > 1
+            onTriggered: deleteSlideDialog.open()
+        }
+    }
     Menu {
         id: fileMenu
         MenuItem {
@@ -911,6 +1216,27 @@ ApplicationWindow {
         }
     }
     Dialog {
+        id: renameSlideDialog
+        title: "Rename slide"
+        anchors.centerIn: parent
+        width: 380
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        TextField {
+            id: slideNameEdit
+            width: parent.width
+            maximumLength: 160
+            placeholderText: "Slide title"
+            onAccepted: renameSlideDialog.accept()
+        }
+        onAccepted: {
+            if (slideNameEdit.text.trim().length)
+                deck.updateSlide({
+                    name: slideNameEdit.text.trim()
+                });
+        }
+    }
+    Dialog {
         id: deleteSlideDialog
         title: "Delete this slide?"
         anchors.centerIn: parent
@@ -937,7 +1263,7 @@ ApplicationWindow {
                 font.pixelSize: 15
                 color: "#ccdde5"
                 background: null
-                text: "START WITH MORPH\nDuplicate a slide (Ctrl+Shift+D), move or resize an object, and press Ctrl+Enter. The scrubber lets you inspect every moment.\n\nEDIT\nDrag to move. Drag the lower-right handle to resize; hold Shift to preserve proportions. Arrow keys nudge; Shift moves 10 pixels. Double-click to edit content.\n\nMOTION\nThe Motion inspector sets paths, easing, entrances, delay, and duration. Bézier control points use slide coordinates.\n\nPRESENT\nF5 starts at slide 1; Shift+F5 starts here. Space / Right advances; Left goes back; B blacks out; Escape ends. A second monitor receives the audience view automatically. On one monitor, use File → Show presenter window if needed.\n\nSAVE\nCtrl+S saves a portable .flux project, including images. PDF export contains static slides. Recovery drafts are stored locally.\n\nFlux 0.1 · Native C++ and Qt Quick · Fully offline"
+                text: "START WITH MORPH\nDuplicate a slide (Ctrl+Shift+D), move or resize an object, and press Ctrl+Enter. The scrubber lets you inspect every moment.\n\nEDIT\nDrag to move. Drag the lower-right handle to resize; hold Shift to preserve proportions. Arrow keys nudge; Shift moves 10 pixels. Double-click to edit content. Right-click objects, slides, or empty canvas for actions. Shift+F10 also opens a menu. Ctrl+X/C/V cuts, copies, and pastes objects while the canvas has focus.\n\nMOTION\nThe Motion inspector sets paths, easing, entrances, delay, and duration. Bézier control points use slide coordinates.\n\nPRESENT\nF5 starts at slide 1; Shift+F5 starts here. Space / Right advances; Left goes back; B blacks out; Escape ends. A second monitor receives the audience view automatically. On one monitor, use File → Show presenter window if needed.\n\nSAVE\nCtrl+S saves a portable .flux project, including images. PDF export contains static slides. Recovery drafts are stored locally.\n\nFlux 0.1.1 · Native C++ and Qt Quick · Fully offline"
             }
         }
     }

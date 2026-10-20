@@ -1,9 +1,11 @@
 #pragma once
 #include <QJsonObject>
 #include <QObject>
+#include <QPointF>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
+#include <optional>
 #include <vector>
 
 class Document final : public QObject {
@@ -19,6 +21,7 @@ class Document final : public QObject {
     Q_PROPERTY(bool dirty READ dirty NOTIFY documentChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
+    Q_PROPERTY(bool canPaste READ canPaste NOTIFY clipboardChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool recoveryAvailable READ recoveryAvailable NOTIFY recoveryChanged)
   public:
@@ -36,13 +39,19 @@ class Document final : public QObject {
     bool dirty() const { return m_doc != m_saved; }
     bool canUndo() const { return !m_undo.empty(); }
     bool canRedo() const { return !m_redo.empty(); }
+    bool canPaste() const;
     QString status() const { return m_status; }
     bool recoveryAvailable() const { return !m_recoverCandidate.isEmpty(); }
     Q_INVOKABLE void select(const QString& id);
     Q_INVOKABLE void addObject(const QString& kind);
+    Q_INVOKABLE void addObjectAt(const QString& kind, double x, double y);
     Q_INVOKABLE void updateObject(const QString& id, const QVariantMap& changes);
     Q_INVOKABLE void deleteObject();
     Q_INVOKABLE void duplicateObject();
+    Q_INVOKABLE bool copyObject();
+    Q_INVOKABLE void cutObject();
+    Q_INVOKABLE bool pasteObject();
+    Q_INVOKABLE bool pasteObjectAt(double x, double y);
     Q_INVOKABLE void layerObject(int direction);
     Q_INVOKABLE void alignObject(const QString& alignment);
     Q_INVOKABLE void addSlide(const QString& layout = "blank");
@@ -74,6 +83,7 @@ class Document final : public QObject {
     void historyChanged();
     void statusChanged();
     void recoveryChanged();
+    void clipboardChanged();
 
   private:
     struct State {
@@ -83,6 +93,7 @@ class Document final : public QObject {
     };
     QJsonObject m_doc, m_saved;
     int m_index{};
+    int m_pasteCount{};
     QString m_selected, m_path, m_status = "Ready";
     std::vector<State> m_undo, m_redo;
     QTimer m_autosave;
@@ -92,6 +103,8 @@ class Document final : public QObject {
     void checkpoint();
     void changed();
     void replaceSlide(QJsonObject slide);
+    bool insertObject(QJsonObject node);
+    bool pasteObjectImpl(std::optional<QPointF> position);
     QJsonObject slide(int i) const;
     void writeRecovery();
     bool loadFile(const QString& path, bool recovery);

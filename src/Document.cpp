@@ -1,11 +1,14 @@
 #include "Document.hpp"
 #include "Render.hpp"
 #include <QBuffer>
+#include <QClipboard>
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMimeData>
 #include <QPageLayout>
 #include <QPageSize>
 #include <QPdfWriter>
@@ -17,6 +20,7 @@
 
 namespace {
 constexpr qint64 MaxFile = 64 * 1024 * 1024;
+constexpr auto ObjectMime = "application/x-flux-object+json";
 const QSet<QString> kinds = {"text",     "rect",  "ellipse", "arrow", "code",
                              "equation", "chart", "table",   "image"};
 QVariantMap track(QJsonObject a, QJsonObject b, double delay = 0, double duration = 1) {
@@ -48,6 +52,10 @@ QString Document::uid() {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
 }
 Document::Document(QObject* parent) : QObject(parent) {
+    connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, [this] {
+        m_pasteCount = 0;
+        emit clipboardChanged();
+    });
     const QString dir =
         qEnvironmentVariable("FLUX_DATA_DIR",
                              QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)) +
@@ -322,14 +330,14 @@ void Document::newDeck(bool demo) {
     report("Ready · fully offline");
 }
 void Document::addObject(const QString& kind) {
+    const auto count = slide(m_index)["objects"].toArray().size();
+    addObjectAt(kind, 160 + count % 8 * 20, 180 + count % 6 * 20);
+}
+void Document::addObjectAt(const QString& kind, double x, double y) {
     if (!kinds.contains(kind) || kind == "image")
         return;
-    auto s = slide(m_index);
-    auto nodes = s["objects"].toArray();
-    if (nodes.size() >= 250) {
-        report("This slide has reached 250 objects.");
+    if (!std::isfinite(x) || !std::isfinite(y))
         return;
-    }
     QString text;
     double w = 440, h = 160;
     if (kind == "text")
@@ -362,13 +370,117 @@ void Document::addObject(const QString& kind) {
         w = 260;
         h = 50;
     }
+    auto n =
+        makeObject(kind, std::clamp(x, 0., 1280. - w), std::clamp(y, 0., 720. - h), w, h, text);
+    insertObject(n);
+}
+bool Document::insertObject(QJsonObject n) {
+    auto s = slide(m_index);
+    auto nodes = s["objects"].toArray();
+    if (nodes.size() >= 250) {
+        report("This slide has reached 250 objects.");
+        return false;
+    }
+    // Reuse file validation for clipboard payloads before changing the document.
+    auto checkSlide = makeSlide("blank");
+    checkSlide["objects"] = QJsonArray{n};
+    auto checkDoc = m_doc;
+    checkDoc["slides"] = QJsonArray{checkSlide};
+    QString why;
+    if (!validate(checkDoc, &why)) {
+        report("Could not insert object: " + why);
+        return false;
+    }
     checkpoint();
-    auto n = makeObject(kind, 160 + nodes.size() % 8 * 20, 180 + nodes.size() % 6 * 20, w, h, text);
     nodes.append(n);
     s["objects"] = nodes;
     replaceSlide(s);
     m_selected = n["id"].toString();
     changed();
+    return true;
+}
+bool Document::canPaste() const {
+    const auto mime = QGuiApplication::clipboard()->mimeData();
+    return mime && (mime->hasFormat(ObjectMime) || mime->hasText());
+}
+bool Document::copyObject() {
+    const auto n = QJsonObject::fromVariantMap(selected());
+    if (n.isEmpty())
+        return false;
+    const QJsonObject payload{{"format", "flux-object"}, {"version", 1}, {"object", n}};
+    const auto bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
+    if (bytes.size() > MaxFile) {
+        report("This object is too large for the clipboard.");
+        return false;
+    }
+    auto mime = new QMimeData;
+    mime->setData(ObjectMime, bytes);
+    if (!n["text"].toString().isEmpty())
+        mime->setText(n["text"].toString());
+    QGuiApplication::clipboard()->setMimeData(mime);
+    report("Object copied");
+    return true;
+}
+void Document::cutObject() {
+    if (copyObject())
+        deleteObject();
+}
+bool Document::pasteObject() {
+    return pasteObjectImpl(std::nullopt);
+}
+bool Document::pasteObjectAt(double x, double y) {
+    if (!std::isfinite(x) || !std::isfinite(y))
+        return false;
+    return pasteObjectImpl(QPointF(x, y));
+}
+bool Document::pasteObjectImpl(std::optional<QPointF> position) {
+    const auto mime = QGuiApplication::clipboard()->mimeData();
+    if (!mime)
+        return false;
+    QJsonObject n;
+    if (mime->hasFormat(ObjectMime)) {
+        const auto bytes = mime->data(ObjectMime);
+        if (bytes.size() > MaxFile) {
+            report("Clipboard object exceeds 64 MiB.");
+            return false;
+        }
+        const auto payload = QJsonDocument::fromJson(bytes).object();
+        if (payload["format"] != "flux-object" || payload["version"].toInt() != 1 ||
+            !payload["object"].isObject()) {
+            report("Clipboard does not contain a valid Flux object.");
+            return false;
+        }
+        n = payload["object"].toObject();
+    } else if (mime->hasText()) {
+        const auto text = mime->text();
+        if (text.isEmpty() || text.size() > 12000) {
+            report("Paste text containing 1–12,000 characters.");
+            return false;
+        }
+        n = makeObject("text", 136, 156, 560, 200, text);
+    } else {
+        report("Copy a Flux object or plain text to paste.");
+        return false;
+    }
+    n["id"] = uid(); // A pasted object must not accidentally join a Morph match.
+    const double offset = 24. * (m_pasteCount + 1);
+    const double oldX = n["x"].toDouble(), oldY = n["y"].toDouble();
+    const double x = std::clamp(position ? position->x() : oldX + offset, 0.,
+                                std::max(0., 1280. - n["w"].toDouble()));
+    const double y = std::clamp(position ? position->y() : oldY + offset, 0.,
+                                std::max(0., 720. - n["h"].toDouble()));
+    n["x"] = x;
+    n["y"] = y;
+    for (auto key : {"c1x", "c2x"})
+        if (n.contains(key) && n[key].isDouble())
+            n[key] = std::clamp(n[key].toDouble() + x - oldX, -20000., 20000.);
+    for (auto key : {"c1y", "c2y"})
+        if (n.contains(key) && n[key].isDouble())
+            n[key] = std::clamp(n[key].toDouble() + y - oldY, -20000., 20000.);
+    if (!insertObject(n))
+        return false;
+    ++m_pasteCount;
+    return true;
 }
 void Document::updateObject(const QString& id, const QVariantMap& changes) {
     auto s = slide(m_index);

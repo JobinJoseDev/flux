@@ -38,6 +38,19 @@ in or out. Content changes crossfade. The interpolator uses the shortest
 rotation across the 0/360-degree seam. Bézier paths operate on the object's
 top-left position in document coordinates.
 
+Selection is an ordered list of IDs in editor state, separate from the saved
+deck. History snapshots retain the whole selection. Rectangle selection uses
+the rotated object's axis-aligned bounds; the rectangle must enclose the
+whole object. Batch edits commit one document snapshot. Drag feedback uses
+shared visual offsets until release, without rebuilding the document per frame.
+
+Reverse presentation playback evaluates the original transition tracks from
+progress 1 to 0. Swapping endpoints would change curved paths and asymmetric
+easing, so the tracks and their ordering remain intact. The later slide owns
+the transition edge in either direction. A mid-transition direction change
+restarts the clock from its current progress with a proportional duration.
+Backward completion shows the prior slide's final state without entrance builds.
+
 The current JSON format keeps images inside each image object. Qt's implicit
 sharing helps avoid copying unchanged state, but large image-heavy documents
 and snapshot history need profiling. A future format should deduplicate
@@ -64,7 +77,7 @@ Fedora hardware before setting frame-rate or memory targets.
 ## Follow-on work
 
 1. Hardware/Wayland validation, accessibility and keyboard focus audit,
-   multi-selection, grouping, snapping guides, and richer text editing.
+   grouping, distribution, collective resizing, and richer text editing.
 2. Click-triggered build sequences, interactive path handles, attached
    connectors, slide master/theme system, and asset deduplication.
 3. Full equation renderer integration, richer chart semantics and language

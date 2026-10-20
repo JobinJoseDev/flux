@@ -1,7 +1,7 @@
 # Flux
 
 An offline presentation editor for Linux, built with C++20 and Qt Quick/QML.
-This is **version 0.1.1**, a working foundation with real editing, object-based
+This is **version 0.1.2**, a working foundation with real editing, object-based
 Morph, curved motion paths, technical content, and a presenter window.
 
 ## Build and install on Fedora
@@ -69,14 +69,15 @@ updates the executable in `~/.local`; it does not remove your project files.
 |---|---|
 | Editing | Drag, resize, Shift-constrained resize, numeric geometry and rotation, keyboard nudge, color, opacity, text size/weight/alignment, layers, alignment, duplicate/delete |
 | Context menus | Right-click objects, slide thumbnails, or empty canvas; keyboard Menu / Shift+F10 also opens the relevant menu |
-| Clipboard | Cut/copy/paste a single native object, including embedded images, across slides or Flux windows; paste external plain text as a text box |
+| Selection | Drag a rectangle around objects; Shift/Ctrl-click, additive rectangles, Ctrl+A, selection outlines; move, nudge, duplicate, delete and align the whole selection |
+| Clipboard | Cut/copy/paste native selections, including embedded images, across slides or Flux windows; paste external plain text as a text box |
 | Slide management | Add, duplicate, delete, reorder; 6 layouts including a blank canvas |
 | Morph | Stable IDs, position/size/rotation/color/opacity interpolation, text/content crossfades, appearing/disappearing objects |
 | Paths | Straight, curved arc, cubic Bézier; smooth, linear, and ease-out timing |
 | Entrances | Fade, rise, zoom, path; per-object delay and duration; timed playback after slide transitions |
 | Technical content | Editable highlighted code; bounded offline TeX subset; editable bar/line charts and tab-separated tables |
 | Diagrams | Rectangles, circles/ellipses, free arrows, text, layers and alignment |
-| Presenting | Fullscreen audience view, speaker notes, next-slide preview, timer, blackout; automatic second-display selection |
+| Presenting | Fullscreen audience view, forward/backward Morph and Fade, notes, next-slide preview, timer, blackout; automatic second-display selection |
 | Files | Versioned JSON `.flux`, embedded PNG assets, atomic saves, debounced recovery, 80-step undo/redo |
 | Export | Static vector/text PDF with embedded raster images |
 
@@ -88,8 +89,9 @@ updates the executable in `~/.local`; it does not remove your project files.
 | Empty canvas or workspace | Paste here, insert text/shapes/code/equations/charts/tables or import an image, undo/redo, toggle grid and snap, slide settings, notes |
 | Slide thumbnail | New blank slide, duplicate, rename, move earlier/later, notes, present from here, delete |
 
-Right-clicking selects the object or slide under the pointer before showing
-its menu. Insertion and **Paste here** use slide coordinates at the click,
+Right-clicking a selected object preserves the selection; clicking an
+unselected object or slide selects that target before showing its menu.
+Insertion and **Paste here** use slide coordinates at the click,
 adjusted to keep the new object's bounds on the slide; imported images start
 centered. Creation and placement undo together. Escape dismisses a menu.
 Use **Shift+F10** or the keyboard **Menu** key with the canvas focused, or on a
@@ -105,6 +107,38 @@ is not supported yet; use **Insert → Image** instead.
 The menu screenshot is in [docs/context-menu.png](docs/context-menu.png).
 See [CHANGELOG.md](CHANGELOG.md) for the patch and next milestones.
 
+## Rectangle selection
+
+Drag from empty canvas or the surrounding workspace to draw a selection
+rectangle. Objects must be fully enclosed, including their rotated bounds.
+The gesture works in either direction. Hold **Shift** or **Ctrl** while
+drawing to add to the current selection; Shift/Ctrl-click toggles individual
+objects. **Ctrl+A** selects all objects on the current slide.
+
+Drag any selected object to move the selection together. Arrow keys nudge it;
+Shift+arrows move 10 pixels. Duplicate, delete, cut, paste, and alignment to
+the slide apply to the whole selection. Each operation is one undo step.
+**Escape** cancels an active rectangle and restores the previous selection;
+otherwise it clears the selection. Persistent grouping, collective resizing,
+and distribution are still planned. The single-object inspector remains
+available when exactly one object is selected.
+
+See [docs/rectangle-selection.png](docs/rectangle-selection.png) for the
+native selection UI.
+
+## Going backward in a presentation
+
+**Left**, **Page Up**, and right-click now reverse the same transition used
+to enter the slide being left. Morph retraces its original path, including
+curves, easing, transforms, and content/background fades. A direction change
+during a transition continues from its current progress. **Cut** remains
+instant in both directions.
+
+Backward navigation ends with the previous slide fully revealed; it does
+not replay that slide's entrance animations. Forward navigation still runs
+entrances after the transition. This fixes the earlier implementation, which
+explicitly bypassed backward transitions. No enable switch is needed.
+
 ## Important boundaries in 0.1
 
 - This is an early native application, not complete PowerPoint parity.
@@ -117,7 +151,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the patch and next milestones.
   comparison symbols. No external TeX installation or executable macros.
 - Code highlighting is lexical and language-agnostic; it is not an IDE.
 - Diagram arrows are independent objects, not connectors that stay attached
-  to shapes. Selection is currently one object at a time; grouping is future work.
+  to shapes. Persistent grouping and multi-object resizing are future work.
 - Chart data uses `label,value` per line (not general CSV), up to 32 points.
   Tables use tab-separated cells and newline-separated rows, up to 40 × 16.
 - Morph resizes visual content with transforms; complex chart/table/text

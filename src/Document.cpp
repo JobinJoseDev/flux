@@ -15,12 +15,38 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
+#include <QTransform>
 #include <QUuid>
 #include <cmath>
 
 namespace {
 constexpr qint64 MaxFile = 64 * 1024 * 1024;
 constexpr auto ObjectMime = "application/x-flux-object+json";
+QRectF objectBounds(const QJsonObject& node) {
+    const double x = node["x"].toDouble(), y = node["y"].toDouble();
+    const double w = node["w"].toDouble(), h = node["h"].toDouble();
+    QTransform transform;
+    transform.translate(x + w / 2, y + h / 2);
+    transform.rotate(node["rotation"].toDouble());
+    return transform.mapRect(QRectF(-w / 2, -h / 2, w, h));
+}
+QRectF objectsBounds(const QJsonArray& nodes) {
+    QRectF bounds;
+    for (const auto& value : nodes)
+        bounds = bounds.united(objectBounds(value.toObject()));
+    return bounds;
+}
+QJsonObject translated(QJsonObject node, double dx, double dy) {
+    node["x"] = node["x"].toDouble() + dx;
+    node["y"] = node["y"].toDouble() + dy;
+    for (auto key : {"c1x", "c2x"})
+        if (node.contains(key) && node[key].isDouble())
+            node[key] = std::clamp(node[key].toDouble() + dx, -20000., 20000.);
+    for (auto key : {"c1y", "c2y"})
+        if (node.contains(key) && node[key].isDouble())
+            node[key] = std::clamp(node[key].toDouble() + dy, -20000., 20000.);
+    return node;
+}
 const QSet<QString> kinds = {"text",     "rect",  "ellipse", "arrow", "code",
                              "equation", "chart", "table",   "image"};
 QVariantMap track(QJsonObject a, QJsonObject b, double delay = 0, double duration = 1) {
@@ -88,7 +114,7 @@ QString Document::title() const {
 }
 QVariantMap Document::selected() const {
     for (const auto& v : slide(m_index).value("objects").toArray())
-        if (v.toObject().value("id").toString() == m_selected)
+        if (v.toObject().value("id").toString() == selectedId())
             return v.toObject().toVariantMap();
     return {};
 }
@@ -97,10 +123,72 @@ void Document::report(const QString& text) {
     emit statusChanged();
 }
 void Document::select(const QString& id) {
-    if (m_selected == id)
+    selectMany(id.isEmpty() ? QStringList() : QStringList{id});
+}
+QJsonArray Document::selectedObjects() const {
+    QJsonArray result;
+    for (const auto& v : slide(m_index)["objects"].toArray())
+        if (m_selected.contains(v.toObject()["id"].toString()))
+            result.append(v);
+    return result;
+}
+QVariantMap Document::selectionBounds() const {
+    auto bounds = objectsBounds(selectedObjects());
+    return {{"x", bounds.x()}, {"y", bounds.y()}, {"w", bounds.width()}, {"h", bounds.height()}};
+}
+void Document::selectMany(const QStringList& ids) {
+    QStringList valid;
+    for (const auto& v : slide(m_index)["objects"].toArray()) {
+        const auto id = v.toObject()["id"].toString();
+        if (ids.contains(id))
+            valid.append(id);
+    }
+    if (valid == m_selected)
         return;
-    m_selected = id;
+    m_selected = valid;
     emit selectionChanged();
+}
+void Document::toggleSelection(const QString& id) {
+    auto next = m_selected;
+    if (!next.removeAll(id))
+        next.append(id);
+    selectMany(next);
+}
+void Document::selectAll() {
+    QStringList ids;
+    for (const auto& v : slide(m_index)["objects"].toArray())
+        ids.append(v.toObject()["id"].toString());
+    selectMany(ids);
+}
+void Document::selectRectangle(double x, double y, double w, double h, const QStringList& base) {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(w) || !std::isfinite(h))
+        return;
+    const auto rectangle = QRectF(x, y, w, h).normalized();
+    auto ids = base;
+    for (const auto& v : slide(m_index)["objects"].toArray())
+        if (rectangle.contains(objectBounds(v.toObject())))
+            ids.append(v.toObject()["id"].toString());
+    selectMany(ids);
+}
+void Document::translateSelection(double dx, double dy) {
+    if (m_selected.isEmpty() || !std::isfinite(dx) || !std::isfinite(dy))
+        return;
+    auto s = slide(m_index);
+    auto nodes = s["objects"].toArray();
+    for (const auto& v : selectedObjects()) {
+        auto n = v.toObject();
+        dx = std::clamp(dx, -20000. - n["x"].toDouble(), 20000. - n["x"].toDouble());
+        dy = std::clamp(dy, -20000. - n["y"].toDouble(), 20000. - n["y"].toDouble());
+    }
+    if (dx == 0 && dy == 0)
+        return;
+    checkpoint();
+    for (int i = 0; i < nodes.size(); ++i)
+        if (m_selected.contains(nodes[i].toObject()["id"].toString()))
+            nodes[i] = translated(nodes[i].toObject(), dx, dy);
+    s["objects"] = nodes;
+    replaceSlide(s);
+    changed();
 }
 void Document::setSlideIndex(int i) {
     int n = m_doc.value("slides").toArray().size();
@@ -375,15 +463,20 @@ void Document::addObjectAt(const QString& kind, double x, double y) {
     insertObject(n);
 }
 bool Document::insertObject(QJsonObject n) {
+    return insertObjects(QJsonArray{n});
+}
+bool Document::insertObjects(QJsonArray added) {
+    if (added.isEmpty())
+        return false;
     auto s = slide(m_index);
     auto nodes = s["objects"].toArray();
-    if (nodes.size() >= 250) {
-        report("This slide has reached 250 objects.");
+    if (nodes.size() + added.size() > 250) {
+        report("This selection would exceed 250 objects on the slide.");
         return false;
     }
     // Reuse file validation for clipboard payloads before changing the document.
     auto checkSlide = makeSlide("blank");
-    checkSlide["objects"] = QJsonArray{n};
+    checkSlide["objects"] = added;
     auto checkDoc = m_doc;
     checkDoc["slides"] = QJsonArray{checkSlide};
     QString why;
@@ -392,10 +485,13 @@ bool Document::insertObject(QJsonObject n) {
         return false;
     }
     checkpoint();
-    nodes.append(n);
+    m_selected.clear();
+    for (const auto& n : added) {
+        nodes.append(n);
+        m_selected.append(n.toObject()["id"].toString());
+    }
     s["objects"] = nodes;
     replaceSlide(s);
-    m_selected = n["id"].toString();
     changed();
     return true;
 }
@@ -404,10 +500,13 @@ bool Document::canPaste() const {
     return mime && (mime->hasFormat(ObjectMime) || mime->hasText());
 }
 bool Document::copyObject() {
-    const auto n = QJsonObject::fromVariantMap(selected());
-    if (n.isEmpty())
+    const auto nodes = selectedObjects();
+    if (nodes.isEmpty())
         return false;
-    const QJsonObject payload{{"format", "flux-object"}, {"version", 1}, {"object", n}};
+    const QJsonObject payload =
+        nodes.size() == 1
+            ? QJsonObject{{"format", "flux-object"}, {"version", 1}, {"object", nodes.first()}}
+            : QJsonObject{{"format", "flux-objects"}, {"version", 1}, {"objects", nodes}};
     const auto bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
     if (bytes.size() > MaxFile) {
         report("This object is too large for the clipboard.");
@@ -415,10 +514,14 @@ bool Document::copyObject() {
     }
     auto mime = new QMimeData;
     mime->setData(ObjectMime, bytes);
-    if (!n["text"].toString().isEmpty())
-        mime->setText(n["text"].toString());
+    QStringList text;
+    for (const auto& n : nodes)
+        if (!n.toObject()["text"].toString().isEmpty())
+            text.append(n.toObject()["text"].toString());
+    if (!text.isEmpty())
+        mime->setText(text.join('\n'));
     QGuiApplication::clipboard()->setMimeData(mime);
-    report("Object copied");
+    report(nodes.size() == 1 ? "Object copied" : QString::number(nodes.size()) + " objects copied");
     return true;
 }
 void Document::cutObject() {
@@ -437,47 +540,56 @@ bool Document::pasteObjectImpl(std::optional<QPointF> position) {
     const auto mime = QGuiApplication::clipboard()->mimeData();
     if (!mime)
         return false;
-    QJsonObject n;
+    QJsonArray nodes;
     if (mime->hasFormat(ObjectMime)) {
         const auto bytes = mime->data(ObjectMime);
         if (bytes.size() > MaxFile) {
-            report("Clipboard object exceeds 64 MiB.");
+            report("Clipboard selection exceeds 64 MiB.");
             return false;
         }
         const auto payload = QJsonDocument::fromJson(bytes).object();
-        if (payload["format"] != "flux-object" || payload["version"].toInt() != 1 ||
-            !payload["object"].isObject()) {
-            report("Clipboard does not contain a valid Flux object.");
+        if (payload["version"].toInt() == 1 && payload["format"] == "flux-object" &&
+            payload["object"].isObject())
+            nodes.append(payload["object"]);
+        else if (payload["version"].toInt() == 1 && payload["format"] == "flux-objects" &&
+                 payload["objects"].isArray())
+            nodes = payload["objects"].toArray();
+        if (nodes.isEmpty() || nodes.size() > 250) {
+            report("Clipboard does not contain a valid Flux selection.");
             return false;
         }
-        n = payload["object"].toObject();
+        auto validation = m_doc;
+        auto page = makeSlide("blank");
+        page["objects"] = nodes;
+        validation["slides"] = QJsonArray{page};
+        QString why;
+        if (!validate(validation, &why)) {
+            report("Could not paste selection: " + why);
+            return false;
+        }
     } else if (mime->hasText()) {
         const auto text = mime->text();
         if (text.isEmpty() || text.size() > 12000) {
             report("Paste text containing 1–12,000 characters.");
             return false;
         }
-        n = makeObject("text", 136, 156, 560, 200, text);
+        nodes.append(makeObject("text", 136, 156, 560, 200, text));
     } else {
-        report("Copy a Flux object or plain text to paste.");
+        report("Copy Flux objects or plain text to paste.");
         return false;
     }
-    n["id"] = uid(); // A pasted object must not accidentally join a Morph match.
+    const auto bounds = objectsBounds(nodes);
     const double offset = 24. * (m_pasteCount + 1);
-    const double oldX = n["x"].toDouble(), oldY = n["y"].toDouble();
-    const double x = std::clamp(position ? position->x() : oldX + offset, 0.,
-                                std::max(0., 1280. - n["w"].toDouble()));
-    const double y = std::clamp(position ? position->y() : oldY + offset, 0.,
-                                std::max(0., 720. - n["h"].toDouble()));
-    n["x"] = x;
-    n["y"] = y;
-    for (auto key : {"c1x", "c2x"})
-        if (n.contains(key) && n[key].isDouble())
-            n[key] = std::clamp(n[key].toDouble() + x - oldX, -20000., 20000.);
-    for (auto key : {"c1y", "c2y"})
-        if (n.contains(key) && n[key].isDouble())
-            n[key] = std::clamp(n[key].toDouble() + y - oldY, -20000., 20000.);
-    if (!insertObject(n))
+    const double x = std::clamp(position ? position->x() : bounds.x() + offset, 0.,
+                                std::max(0., 1280. - bounds.width()));
+    const double y = std::clamp(position ? position->y() : bounds.y() + offset, 0.,
+                                std::max(0., 720. - bounds.height()));
+    for (int i = 0; i < nodes.size(); ++i) {
+        auto n = translated(nodes[i].toObject(), x - bounds.x(), y - bounds.y());
+        n["id"] = uid();
+        nodes[i] = n;
+    }
+    if (!insertObjects(nodes))
         return false;
     ++m_pasteCount;
     return true;
@@ -532,42 +644,35 @@ void Document::updateObject(const QString& id, const QVariantMap& changes) {
     }
 }
 void Document::deleteObject() {
-    auto s = slide(m_index);
-    auto nodes = s["objects"].toArray();
-    for (int i = 0; i < nodes.size(); ++i)
-        if (nodes[i].toObject()["id"].toString() == m_selected) {
-            checkpoint();
-            nodes.removeAt(i);
-            s["objects"] = nodes;
-            replaceSlide(s);
-            m_selected.clear();
-            changed();
-            return;
-        }
-}
-void Document::duplicateObject() {
-    auto n = QJsonObject::fromVariantMap(selected());
-    if (n.isEmpty())
+    if (m_selected.isEmpty())
         return;
     auto s = slide(m_index);
     auto nodes = s["objects"].toArray();
-    if (nodes.size() >= 250)
-        return;
     checkpoint();
-    n["id"] = uid();
-    n["x"] = n["x"].toDouble() + 24;
-    n["y"] = n["y"].toDouble() + 24;
-    nodes.append(n);
+    for (int i = nodes.size() - 1; i >= 0; --i)
+        if (m_selected.contains(nodes[i].toObject()["id"].toString()))
+            nodes.removeAt(i);
     s["objects"] = nodes;
     replaceSlide(s);
-    m_selected = n["id"].toString();
+    m_selected.clear();
     changed();
 }
+void Document::duplicateObject() {
+    auto nodes = selectedObjects();
+    for (int i = 0; i < nodes.size(); ++i) {
+        auto n = translated(nodes[i].toObject(), 24, 24);
+        n["id"] = uid();
+        nodes[i] = n;
+    }
+    insertObjects(nodes);
+}
 void Document::layerObject(int direction) {
+    if (selectionCount() != 1)
+        return;
     auto s = slide(m_index);
     auto nodes = s["objects"].toArray();
     for (int i = 0; i < nodes.size(); ++i)
-        if (nodes[i].toObject()["id"].toString() == m_selected) {
+        if (nodes[i].toObject()["id"].toString() == selectedId()) {
             int to = qBound(0, i + direction, int(nodes.size()) - 1);
             if (to == i)
                 return;
@@ -581,32 +686,34 @@ void Document::layerObject(int direction) {
         }
 }
 void Document::alignObject(const QString& a) {
-    auto n = selected();
-    if (n.isEmpty())
+    if (m_selected.isEmpty())
         return;
-    QVariantMap p;
+    const auto bounds = objectsBounds(selectedObjects());
+    double dx = 0, dy = 0;
     if (a == "left")
-        p["x"] = 64;
+        dx = 64 - bounds.left();
     if (a == "center")
-        p["x"] = (1280 - n["w"].toDouble()) / 2;
+        dx = 640 - bounds.center().x();
     if (a == "right")
-        p["x"] = 1216 - n["w"].toDouble();
+        dx = 1216 - bounds.right();
     if (a == "middle")
-        p["y"] = (720 - n["h"].toDouble()) / 2;
-    updateObject(m_selected, p);
+        dy = 360 - bounds.center().y();
+    translateSelection(dx, dy);
 }
 void Document::unlinkObject() {
+    if (selectionCount() != 1)
+        return;
     auto s = slide(m_index);
     auto nodes = s["objects"].toArray();
     for (int i = 0; i < nodes.size(); ++i) {
         auto n = nodes[i].toObject();
-        if (n["id"].toString() == m_selected) {
+        if (n["id"].toString() == selectedId()) {
             checkpoint();
             n["id"] = uid();
             nodes[i] = n;
             s["objects"] = nodes;
             replaceSlide(s);
-            m_selected = n["id"].toString();
+            m_selected = QStringList{n["id"].toString()};
             changed();
             return;
         }
@@ -874,7 +981,7 @@ bool Document::importImage(const QUrl& url) {
     ns.append(n);
     s["objects"] = ns;
     replaceSlide(s);
-    m_selected = n["id"].toString();
+    m_selected = QStringList{n["id"].toString()};
     changed();
     return true;
 }

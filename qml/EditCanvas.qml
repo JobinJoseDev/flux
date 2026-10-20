@@ -8,6 +8,12 @@ Item {
     property bool showGrid: false
     property bool guideX: false
     property bool guideY: false
+    property real dragDx: 0
+    property real dragDy: 0
+    property bool gestureCanceled: false
+    property bool marqueeActive: false
+    property point marqueeStart
+    property point marqueeEnd
     signal editContent
     signal removeRequested
     signal objectContextRequested(real x, real y)
@@ -17,16 +23,12 @@ Item {
         return snap ? Math.round(v / 8) * 8 : Math.round(v);
     }
     function nudge(dx, dy) {
-        if (!deck.selectedId)
-            return;
-        deck.updateObject(deck.selectedId, {
-            x: deck.selected.x + dx,
-            y: deck.selected.y + dy
-        });
+        deck.translateSelection(dx, dy);
     }
     function openKeyboardMenu() {
         if (deck.selectedId) {
-            var point = paper.mapToItem(editor, deck.selected.x + deck.selected.w / 2, deck.selected.y + deck.selected.h / 2);
+            var bounds = deck.selectionBounds;
+            var point = paper.mapToItem(editor, bounds.x + bounds.w / 2, bounds.y + bounds.h / 2);
             objectContextRequested(point.x, point.y);
         } else {
             var center = paper.mapToItem(editor, 640, 360);
@@ -62,20 +64,63 @@ Item {
             removeRequested();
             event.accepted = true;
         } else if (event.key === Qt.Key_Escape) {
-            deck.select("");
+            if (background.pressed) {
+                gestureCanceled = true;
+                marqueeActive = false;
+                deck.selectMany(background.originalSelection);
+            } else {
+                gestureCanceled = true;
+                dragDx = 0;
+                dragDy = 0;
+                deck.select("");
+            }
             event.accepted = true;
         }
     }
     MouseArea {
+        id: background
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.RightButton
+        preventStealing: true
+        property var originalSelection: []
+        property var baseSelection: []
+        property bool additive: false
+        onPressed: function (mouse) {
+            editor.forceActiveFocus();
+            editor.gestureCanceled = false;
+            if (mouse.button !== Qt.LeftButton)
+                return;
+            additive = !!(mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier));
+            originalSelection = deck.selectedIds.slice();
+            baseSelection = additive ? originalSelection : [];
+            editor.marqueeStart = mapToItem(paper, mouse.x, mouse.y);
+            editor.marqueeEnd = editor.marqueeStart;
+            editor.marqueeActive = false;
+        }
+        onPositionChanged: function (mouse) {
+            if (!(pressedButtons & Qt.LeftButton) || editor.gestureCanceled)
+                return;
+            editor.marqueeEnd = mapToItem(paper, mouse.x, mouse.y);
+            if (Math.abs(editor.marqueeEnd.x - editor.marqueeStart.x) * editor.canvasScale > 4 || Math.abs(editor.marqueeEnd.y - editor.marqueeStart.y) * editor.canvasScale > 4)
+                editor.marqueeActive = true;
+            if (editor.marqueeActive)
+                deck.selectRectangle(editor.marqueeStart.x, editor.marqueeStart.y, editor.marqueeEnd.x - editor.marqueeStart.x, editor.marqueeEnd.y - editor.marqueeStart.y, baseSelection);
+        }
+        onReleased: function (mouse) {
+            if (mouse.button !== Qt.LeftButton || editor.gestureCanceled)
+                return;
+            if (!editor.marqueeActive && !additive)
+                deck.select("");
+            editor.marqueeActive = false;
+        }
+        onCanceled: {
+            if (editor.marqueeActive)
+                deck.selectMany(originalSelection);
+            editor.marqueeActive = false;
+        }
         onClicked: function (mouse) {
             if (mouse.button === Qt.RightButton)
                 editor.openCanvasMenu(this, mouse.x, mouse.y);
-            else {
-                deck.select("");
-                editor.forceActiveFocus();
-            }
         }
     }
     Rectangle {
@@ -96,18 +141,6 @@ Item {
             border.color: "#344754"
             border.width: 1 / editor.canvasScale
         }
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton | Qt.RightButton
-            onClicked: function (mouse) {
-                if (mouse.button === Qt.RightButton)
-                    editor.openCanvasMenu(this, mouse.x, mouse.y);
-                else {
-                    deck.select("");
-                    editor.forceActiveFocus();
-                }
-            }
-        }
         Canvas {
             anchors.fill: parent
             visible: editor.showGrid
@@ -126,13 +159,11 @@ Item {
                 id: item
                 objectName: "object-" + modelData.id
                 required property var modelData
-                property real dx: 0
-                property real dy: 0
                 property real dw: 0
                 property real dh: 0
-                property bool selected: deck.selectedId === modelData.id
-                x: modelData.x + dx
-                y: modelData.y + dy
+                property bool selected: deck.selectedIds.indexOf(modelData.id) >= 0
+                x: modelData.x + (selected ? editor.dragDx : 0)
+                y: modelData.y + (selected ? editor.dragDy : 0)
                 width: modelData.w + dw
                 height: modelData.h + dh
                 rotation: modelData.rotation || 0
@@ -152,34 +183,39 @@ Item {
                     property point pressAt
                     onPressed: function (mouse) {
                         editor.forceActiveFocus();
-                        deck.select(item.modelData.id);
+                        editor.gestureCanceled = false;
+                        if (mouse.button === Qt.LeftButton && (mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier)))
+                            deck.toggleSelection(item.modelData.id);
+                        else if (!item.selected)
+                            deck.select(item.modelData.id);
                         pressAt = mapToItem(paper, mouse.x, mouse.y);
                     }
                     onPositionChanged: function (mouse) {
-                        if (!(pressedButtons & Qt.LeftButton))
+                        if (!(pressedButtons & Qt.LeftButton) || !item.selected || editor.gestureCanceled)
                             return;
                         var p = mapToItem(paper, mouse.x, mouse.y);
-                        var nx = editor.snapped(item.modelData.x + p.x - pressAt.x);
-                        var ny = editor.snapped(item.modelData.y + p.y - pressAt.y);
-                        editor.guideX = editor.snap && Math.abs(nx + item.width / 2 - 640) < 8;
-                        editor.guideY = editor.snap && Math.abs(ny + item.height / 2 - 360) < 8;
+                        var bounds = deck.selectionBounds;
+                        var nx = editor.snapped(bounds.x + p.x - pressAt.x);
+                        var ny = editor.snapped(bounds.y + p.y - pressAt.y);
+                        editor.guideX = editor.snap && Math.abs(nx + bounds.w / 2 - 640) < 8;
+                        editor.guideY = editor.snap && Math.abs(ny + bounds.h / 2 - 360) < 8;
                         if (editor.guideX)
-                            nx = 640 - item.width / 2;
+                            nx = 640 - bounds.w / 2;
                         if (editor.guideY)
-                            ny = 360 - item.height / 2;
-                        item.dx = nx - item.modelData.x;
-                        item.dy = ny - item.modelData.y;
+                            ny = 360 - bounds.h / 2;
+                        editor.dragDx = nx - bounds.x;
+                        editor.dragDy = ny - bounds.y;
                     }
                     onReleased: function (mouse) {
                         if (mouse.button !== Qt.LeftButton)
                             return;
                         editor.guideX = false;
                         editor.guideY = false;
-                        if (item.dx !== 0 || item.dy !== 0)
-                            deck.updateObject(item.modelData.id, {
-                                x: item.x,
-                                y: item.y
-                            });
+                        var dx = editor.dragDx, dy = editor.dragDy;
+                        editor.dragDx = 0;
+                        editor.dragDy = 0;
+                        if (!editor.gestureCanceled)
+                            deck.translateSelection(dx, dy);
                     }
                     onClicked: function (mouse) {
                         if (mouse.button === Qt.RightButton) {
@@ -188,13 +224,13 @@ Item {
                         }
                     }
                     onCanceled: {
-                        item.dx = 0;
-                        item.dy = 0;
+                        editor.dragDx = 0;
+                        editor.dragDy = 0;
                         editor.guideX = false;
                         editor.guideY = false;
                     }
                     onDoubleClicked: function (mouse) {
-                        if (mouse.button === Qt.LeftButton)
+                        if (mouse.button === Qt.LeftButton && deck.selectionCount === 1)
                             editor.editContent();
                     }
                 }
@@ -207,7 +243,7 @@ Item {
                     border.width: 1.5 / editor.canvasScale
                 }
                 Rectangle {
-                    visible: item.selected
+                    visible: item.selected && deck.selectionCount === 1
                     x: parent.width - width / 2
                     y: parent.height - height / 2
                     width: 10 / editor.canvasScale
@@ -248,6 +284,30 @@ Item {
                     }
                 }
             }
+        }
+        Rectangle {
+            objectName: "selectionBounds"
+            visible: deck.selectionCount > 1
+            x: deck.selectionBounds.x + editor.dragDx
+            y: deck.selectionBounds.y + editor.dragDy
+            width: deck.selectionBounds.w
+            height: deck.selectionBounds.h
+            color: "transparent"
+            border.color: "#b5f7e9"
+            border.width: 1 / editor.canvasScale
+            z: 1000
+        }
+        Rectangle {
+            objectName: "selectionRectangle"
+            visible: editor.marqueeActive
+            x: Math.min(editor.marqueeStart.x, editor.marqueeEnd.x)
+            y: Math.min(editor.marqueeStart.y, editor.marqueeEnd.y)
+            width: Math.abs(editor.marqueeEnd.x - editor.marqueeStart.x)
+            height: Math.abs(editor.marqueeEnd.y - editor.marqueeStart.y)
+            color: "#258edbd3"
+            border.color: "#a9f5e5"
+            border.width: 1 / editor.canvasScale
+            z: 1001
         }
         Rectangle {
             x: 640

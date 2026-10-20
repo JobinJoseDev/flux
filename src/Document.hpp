@@ -1,7 +1,9 @@
 #pragma once
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QPointF>
+#include <QStringList>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -15,6 +17,9 @@ class Document final : public QObject {
     Q_PROPERTY(QVariantMap currentSlide READ currentSlide NOTIFY documentChanged)
     Q_PROPERTY(QVariantMap selected READ selected NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedId READ selectedId NOTIFY selectionChanged)
+    Q_PROPERTY(QStringList selectedIds READ selectedIds NOTIFY selectionChanged)
+    Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
+    Q_PROPERTY(QVariantMap selectionBounds READ selectionBounds NOTIFY selectionChanged)
     Q_PROPERTY(int slideIndex READ slideIndex WRITE setSlideIndex NOTIFY documentChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY documentChanged)
     Q_PROPERTY(QString filePath READ filePath NOTIFY fileChanged)
@@ -30,7 +35,10 @@ class Document final : public QObject {
     QVariantList objects() const;
     QVariantMap currentSlide() const;
     QVariantMap selected() const;
-    QString selectedId() const { return m_selected; }
+    QString selectedId() const { return m_selected.isEmpty() ? QString() : m_selected.last(); }
+    QStringList selectedIds() const { return m_selected; }
+    int selectionCount() const { return m_selected.size(); }
+    QVariantMap selectionBounds() const;
     int slideIndex() const { return m_index; }
     void setSlideIndex(int i);
     QString title() const;
@@ -43,6 +51,12 @@ class Document final : public QObject {
     QString status() const { return m_status; }
     bool recoveryAvailable() const { return !m_recoverCandidate.isEmpty(); }
     Q_INVOKABLE void select(const QString& id);
+    Q_INVOKABLE void selectMany(const QStringList& ids);
+    Q_INVOKABLE void toggleSelection(const QString& id);
+    Q_INVOKABLE void selectAll();
+    Q_INVOKABLE void selectRectangle(double x, double y, double w, double h,
+                                     const QStringList& base = {});
+    Q_INVOKABLE void translateSelection(double dx, double dy);
     Q_INVOKABLE void addObject(const QString& kind);
     Q_INVOKABLE void addObjectAt(const QString& kind, double x, double y);
     Q_INVOKABLE void updateObject(const QString& id, const QVariantMap& changes);
@@ -89,12 +103,13 @@ class Document final : public QObject {
     struct State {
         QJsonObject doc;
         int index{};
-        QString selected;
+        QStringList selected;
     };
     QJsonObject m_doc, m_saved;
     int m_index{};
     int m_pasteCount{};
-    QString m_selected, m_path, m_status = "Ready";
+    QStringList m_selected;
+    QString m_path, m_status = "Ready";
     std::vector<State> m_undo, m_redo;
     QTimer m_autosave;
     QString m_recoveryPath, m_recoverCandidate;
@@ -104,6 +119,8 @@ class Document final : public QObject {
     void changed();
     void replaceSlide(QJsonObject slide);
     bool insertObject(QJsonObject node);
+    bool insertObjects(QJsonArray nodes);
+    QJsonArray selectedObjects() const;
     bool pasteObjectImpl(std::optional<QPointF> position);
     QJsonObject slide(int i) const;
     void writeRecovery();

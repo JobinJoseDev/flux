@@ -6,7 +6,7 @@ Rectangle {
     id: inspector
     color: "#111d28"
     property var selection: deck.selected
-    property bool hasSelection: deck.selectedId.length > 0
+    property bool hasSelection: deck.selectionCount === 1
     property int tab: 0
     property bool matched: {
         if (!hasSelection || deck.slideIndex < 1)
@@ -62,13 +62,50 @@ Rectangle {
                     height: 2
                 }
                 Text {
-                    text: inspector.hasSelection ? (inspector.selection.kind || "Object").toUpperCase() : "SLIDE " + (deck.slideIndex + 1)
+                    text: deck.selectionCount > 1 ? deck.selectionCount + " OBJECTS SELECTED" : inspector.hasSelection ? (inspector.selection.kind || "Object").toUpperCase() : "SLIDE " + (deck.slideIndex + 1)
                     color: "#8edbd3"
                     font.pixelSize: 11
                     font.letterSpacing: 1.5
                 }
                 ColumnLayout {
-                    visible: !inspector.hasSelection
+                    visible: deck.selectionCount > 1
+                    Layout.fillWidth: true
+                    spacing: 12
+                    Text {
+                        text: "Drag a selected object to move the selection. Shift or Ctrl-click to add or remove objects."
+                        color: "#a8bfcc"
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    Tool {
+                        text: "Duplicate selection"
+                        Layout.fillWidth: true
+                        onClicked: deck.duplicateObject()
+                    }
+                    Tool {
+                        text: "Center horizontally"
+                        Layout.fillWidth: true
+                        onClicked: deck.alignObject("center")
+                    }
+                    Tool {
+                        text: "Center vertically"
+                        Layout.fillWidth: true
+                        onClicked: deck.alignObject("middle")
+                    }
+                    Tool {
+                        text: "Delete selection"
+                        Layout.fillWidth: true
+                        onClicked: deck.deleteObject()
+                    }
+                    Text {
+                        text: "Copy / paste: Ctrl+C / Ctrl+V\nNudge: arrows · Shift for 10 pixels\nSelect all: Ctrl+A · Clear: Escape"
+                        color: "#849eaf"
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                }
+                ColumnLayout {
+                    visible: deck.selectionCount === 0
                     Layout.fillWidth: true
                     spacing: 14
                     Text {

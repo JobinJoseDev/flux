@@ -222,6 +222,89 @@ class DocumentTest : public QObject {
         d.cleanupRecovery();
         clipboard->clear();
     }
+    void rectangleSelectionAndBatchEdits() {
+        Document d;
+        d.newDeck(false);
+        d.addSlide("blank");
+        d.addObjectAt("rect", 100, 100);
+        const auto first = d.selectedId();
+        d.updateObject(first, {{"w", 80}, {"h", 60}});
+        d.addObjectAt("ellipse", 250, 100);
+        const auto second = d.selectedId();
+        d.updateObject(second, {{"w", 80}, {"h", 60}});
+        d.addObjectAt("rect", 500, 100);
+        const auto rotated = d.selectedId();
+        d.updateObject(rotated, {{"w", 100}, {"h", 100}, {"rotation", 45}});
+        const auto before = d.json();
+        d.selectRectangle(50, 50, 350, 200);
+        QCOMPARE(d.selectedIds(), QStringList({first, second}));
+        QCOMPARE(d.json(), before); // Selection is not a document mutation.
+        d.selectRectangle(400, 250, -350, -200);
+        QCOMPARE(d.selectedIds(), QStringList({first, second}));
+        d.selectRectangle(120, 110, 30, 30);
+        QCOMPARE(d.selectionCount(), 0); // Merely touching an object is insufficient.
+        d.selectRectangle(500, 100, 100, 100);
+        QCOMPARE(d.selectionCount(), 0); // Rotation extends outside the unrotated bounds.
+        d.selectRectangle(470, 70, 160, 160);
+        QCOMPARE(d.selectedIds(), QStringList({rotated}));
+        d.selectRectangle(50, 50, 350, 200, d.selectedIds());
+        QCOMPARE(d.selectionCount(), 3);
+        d.toggleSelection(rotated);
+        QCOMPARE(d.selectedIds(), QStringList({first, second}));
+        d.translateSelection(40, 20);
+        QCOMPARE(d.objects()[0].toMap()["x"].toDouble(), 140.);
+        QCOMPARE(d.objects()[1].toMap()["x"].toDouble(), 290.);
+        QCOMPARE(d.objects()[2].toMap()["x"].toDouble(), 500.);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        QCOMPARE(d.selectedIds(), QStringList({first, second}));
+        d.duplicateObject();
+        QCOMPARE(d.objects().size(), 5);
+        QCOMPARE(d.selectionCount(), 2);
+        QVERIFY(!d.selectedIds().contains(first) && !d.selectedIds().contains(second));
+        d.undo();
+        QCOMPARE(d.json(), before);
+        QVERIFY(d.copyObject());
+        QVERIFY(d.pasteObjectAt(600, 300));
+        QCOMPARE(d.objects().size(), 5);
+        QCOMPARE(d.objects()[3].toMap()["x"].toDouble(), 600.);
+        QCOMPARE(d.objects()[4].toMap()["x"].toDouble(), 750.);
+        QCOMPARE(d.selectionCount(), 2);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        QCOMPARE(d.selectedIds(), QStringList({first, second}));
+        d.cutObject();
+        QCOMPARE(d.objects().size(), 1);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        QCOMPARE(d.selectionCount(), 2);
+        d.alignObject("center");
+        QCOMPARE(d.selectionBounds()["x"].toDouble(), 525.);
+        QCOMPARE(d.objects()[1].toMap()["x"].toDouble() - d.objects()[0].toMap()["x"].toDouble(),
+                 150.);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        d.selectAll();
+        QCOMPARE(d.selectionCount(), 3);
+        d.setSlideIndex(0);
+        QCOMPARE(d.selectionCount(), 0);
+        d.cleanupRecovery();
+    }
+    void batchPasteCapacityIsAtomic() {
+        Document d;
+        d.addSlide("blank");
+        d.addObject("rect");
+        d.addObject("ellipse");
+        d.selectAll();
+        QVERIFY(d.copyObject());
+        for (int i = 2; i < 249; ++i)
+            d.addObject("rect");
+        const auto before = d.json();
+        QVERIFY(!d.pasteObject());
+        QCOMPARE(d.json(), before);
+        QCOMPARE(d.objects().size(), 249);
+        d.cleanupRecovery();
+    }
 };
 QTEST_MAIN(DocumentTest)
 #include "document_test.moc"

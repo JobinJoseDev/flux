@@ -84,7 +84,7 @@ ApplicationWindow {
             saveDialog.open();
     }
     function editObject() {
-        if (!deck.selectedId || ["text", "code", "equation", "chart", "table"].indexOf(deck.selected.kind) < 0)
+        if (deck.selectionCount !== 1 || ["text", "code", "equation", "chart", "table"].indexOf(deck.selected.kind) < 0)
             return;
         contentDialog.objectId = deck.selectedId;
         contentDialog.kind = deck.selected.kind;
@@ -165,6 +165,11 @@ ApplicationWindow {
         sequence: "Ctrl+D"
         enabled: editor.activeFocus
         onActivated: deck.selectedId ? deck.duplicateObject() : deck.duplicateSlide()
+    }
+    Shortcut {
+        sequence: "Ctrl+A"
+        enabled: editor.activeFocus
+        onActivated: deck.selectAll()
     }
     Shortcut {
         sequence: "Ctrl+X"
@@ -757,13 +762,13 @@ ApplicationWindow {
     }
     Action {
         id: duplicateObjectAction
-        text: "Duplicate    Ctrl+D"
-        enabled: !!deck.selectedId && deck.objects.length < 250
+        text: deck.selectionCount > 1 ? "Duplicate selection    Ctrl+D" : "Duplicate    Ctrl+D"
+        enabled: deck.selectionCount > 0 && deck.objects.length + deck.selectionCount <= 250
         onTriggered: deck.duplicateObject()
     }
     Action {
         id: deleteObjectAction
-        text: "Delete    Del"
+        text: deck.selectionCount > 1 ? "Delete selection    Del" : "Delete    Del"
         enabled: !!deck.selectedId
         onTriggered: deck.deleteObject()
     }
@@ -779,7 +784,7 @@ ApplicationWindow {
         }
         MenuItem {
             text: ["chart", "table"].indexOf(deck.selected.kind) >= 0 ? "Edit data…" : "Edit content…"
-            enabled: ["text", "code", "equation", "chart", "table"].indexOf(deck.selected.kind) >= 0
+            enabled: deck.selectionCount === 1 && ["text", "code", "equation", "chart", "table"].indexOf(deck.selected.kind) >= 0
             onTriggered: app.editObject()
         }
         MenuSeparator {}
@@ -802,6 +807,7 @@ ApplicationWindow {
         MenuSeparator {}
         Menu {
             title: "Arrange"
+            enabled: deck.selectionCount === 1
             MenuItem {
                 text: "Bring to front"
                 enabled: objectContextMenu.selectedLayer < deck.objects.length - 1
@@ -824,7 +830,7 @@ ApplicationWindow {
             }
         }
         Menu {
-            title: "Align to slide"
+            title: deck.selectionCount > 1 ? "Align selection to slide" : "Align to slide"
             MenuItem {
                 text: "Left margin"
                 onTriggered: deck.alignObject("left")
@@ -844,10 +850,12 @@ ApplicationWindow {
         }
         MenuItem {
             text: "Format object"
+            enabled: deck.selectionCount === 1
             onTriggered: inspector.tab = 0
         }
         MenuItem {
             text: "Motion settings"
+            enabled: deck.selectionCount === 1
             onTriggered: inspector.tab = 1
         }
         MenuItem {
@@ -1263,14 +1271,18 @@ ApplicationWindow {
                 font.pixelSize: 15
                 color: "#ccdde5"
                 background: null
-                text: "START WITH MORPH\nDuplicate a slide (Ctrl+Shift+D), move or resize an object, and press Ctrl+Enter. The scrubber lets you inspect every moment.\n\nEDIT\nDrag to move. Drag the lower-right handle to resize; hold Shift to preserve proportions. Arrow keys nudge; Shift moves 10 pixels. Double-click to edit content. Right-click objects, slides, or empty canvas for actions. Shift+F10 also opens a menu. Ctrl+X/C/V cuts, copies, and pastes objects while the canvas has focus.\n\nMOTION\nThe Motion inspector sets paths, easing, entrances, delay, and duration. Bézier control points use slide coordinates.\n\nPRESENT\nF5 starts at slide 1; Shift+F5 starts here. Space / Right advances; Left goes back; B blacks out; Escape ends. A second monitor receives the audience view automatically. On one monitor, use File → Show presenter window if needed.\n\nSAVE\nCtrl+S saves a portable .flux project, including images. PDF export contains static slides. Recovery drafts are stored locally.\n\nFlux 0.1.1 · Native C++ and Qt Quick · Fully offline"
+                text: "START WITH MORPH\nDuplicate a slide (Ctrl+Shift+D), move or resize an object, and press Ctrl+Enter. The scrubber lets you inspect every moment.\n\nEDIT\nDrag on empty canvas to select enclosed objects. Shift/Ctrl-click toggles objects; Ctrl+A selects all. Drag a selected object to move the whole selection. Drag the lower-right handle to resize; hold Shift to preserve proportions. Arrow keys nudge; Shift moves 10 pixels. Double-click to edit content. Right-click objects, slides, or empty canvas for actions. Shift+F10 also opens a menu. Ctrl+X/C/V cuts, copies, and pastes objects while the canvas has focus.\n\nMOTION\nThe Motion inspector sets paths, easing, entrances, delay, and duration. Bézier control points use slide coordinates.\n\nPRESENT\nF5 starts at slide 1; Shift+F5 starts here. Space / Right advances; Left / Page Up or right-click reverses the transition; B blacks out; Escape ends. A second monitor receives the audience view automatically. On one monitor, use File → Show presenter window if needed.\n\nSAVE\nCtrl+S saves a portable .flux project, including images. PDF export contains static slides. Recovery drafts are stored locally.\n\nFlux 0.1.2 · Native C++ and Qt Quick · Fully offline"
             }
         }
     }
     Presentation {
         id: audience
         objectName: "audience"
-        onEnded: presenter.stop()
+        onEnded: {
+            presenter.stop();
+            app.requestActivate();
+            editor.forceActiveFocus();
+        }
     }
     Presenter {
         id: presenter

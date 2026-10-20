@@ -1,4 +1,4 @@
-# Verification for Flux 0.1.1
+# Verification for Flux 0.1.2
 
 ## Environment
 
@@ -21,6 +21,9 @@ included in the source bundle and are not runtime services used by Flux.
 | Native UI integration | Real pointer events drag an object and click the timeline; the first scrub preserves its requested position; object/canvas/thumbnail right-click menus open on the correct target; actual menu clicks copy/paste and duplicate slides; Shift+F10 and Escape work; keyboard nudge works after dismissal; content and notes dialogs commit; the audience window opens and advances; zero QML runtime warnings |
 | Visual editor check | Actual native framebuffer inspected at 1440 × 960; included as `docs/editor.png` |
 | Context-menu visual check | Actual menu framebuffer inspected; included as `docs/context-menu.png` |
+| Rectangle selection | Rotated bounds, enclosure vs intersection, reverse drag direction, additive selection, selection history, batch geometry/clipboard/delete/duplicate, relative layout, and atomic capacity rejection |
+| Selection UI | Real pointer rectangle, selection persistence, shared drag, right-click preservation, Shift/Ctrl-click, select-all, batch keyboard clipboard/delete, and Escape cancellation; native framebuffer in `docs/rectangle-selection.png` |
+| Reverse playback | Backward transition start and progress, edge ownership, completion without entrance replay, right-click navigation, mid-flight direction changes, first-slide boundary, and Cut behavior |
 | PDF inspection | Exported the five-slide example, confirmed five pages, rendered every page with Poppler, and visually inspected text, code, chart, formula, and geometry |
 | Installer and metadata | Fedora install script passes `bash -n`; desktop MIME/AppStream XML parses |
 

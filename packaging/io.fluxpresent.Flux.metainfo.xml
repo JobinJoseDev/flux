@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.fluxpresent.Flux</id>
+  <name>Flux</name>
+  <summary>Create offline presentations with motion</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description><p>A native presentation editor with object-based morph transitions, motion paths, code blocks, equations, charts, tables, and speaker notes.</p></description>
+  <launchable type="desktop-id">io.fluxpresent.Flux.desktop</launchable>
+  <provides><binary>flux</binary></provides>
+  <releases><release version="0.1.0" date="2026-10-19"/></releases>
+</component>

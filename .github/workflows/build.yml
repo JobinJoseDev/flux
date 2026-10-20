@@ -1,0 +1,16 @@
+name: Fedora build and tests
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  fedora:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: dnf install -y gcc-c++ cmake ninja-build qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtwayland mesa-libGL-devel
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flux-fedora-binary
+          path: build/flux

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Flux
+GenericName=Presentation Editor
+Comment=Offline presentations with motion
+Exec=flux %f
+Icon=io.fluxpresent.Flux
+Terminal=false
+Categories=Office;Presentation;
+MimeType=application/x-flux-presentation;
+StartupNotify=true

@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
+#include <QHash>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -22,6 +23,27 @@
 namespace {
 constexpr qint64 MaxFile = 64 * 1024 * 1024;
 constexpr auto ObjectMime = "application/x-flux-object+json";
+constexpr int MaxGroupDepth = 16;
+QString outerGroup(const QJsonObject& node) {
+    const auto groups = node["groups"].toArray();
+    return groups.isEmpty() ? QString() : groups.first().toString();
+}
+bool usesFontSize(const QJsonObject& node) {
+    const auto kind = node["kind"].toString();
+    return kind == "text" || kind == "code" || kind == "equation" || kind == "chart" ||
+           kind == "table";
+}
+void remapGroups(QJsonObject& node, QHash<QString, QString>& identities) {
+    auto groups = node.value("groups").toArray();
+    for (int i = 0; i < groups.size(); ++i) {
+        const auto old = groups[i].toString();
+        if (!identities.contains(old))
+            identities[old] = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        groups[i] = identities[old];
+    }
+    if (!groups.isEmpty())
+        node["groups"] = groups;
+}
 QRectF objectBounds(const QJsonObject& node) {
     const double x = node["x"].toDouble(), y = node["y"].toDouble();
     const double w = node["w"].toDouble(), h = node["h"].toDouble();
@@ -138,9 +160,17 @@ QVariantMap Document::selectionBounds() const {
 }
 void Document::selectMany(const QStringList& ids) {
     QStringList valid;
-    for (const auto& v : slide(m_index)["objects"].toArray()) {
-        const auto id = v.toObject()["id"].toString();
-        if (ids.contains(id))
+    const auto nodes = slide(m_index)["objects"].toArray();
+    QSet<QString> groups;
+    for (const auto& v : nodes) {
+        const auto node = v.toObject();
+        if (ids.contains(node["id"].toString()) && !outerGroup(node).isEmpty())
+            groups.insert(outerGroup(node));
+    }
+    for (const auto& v : nodes) {
+        const auto node = v.toObject();
+        const auto id = node["id"].toString();
+        if (ids.contains(id) || groups.contains(outerGroup(node)))
             valid.append(id);
     }
     if (valid == m_selected)
@@ -150,7 +180,15 @@ void Document::selectMany(const QStringList& ids) {
 }
 void Document::toggleSelection(const QString& id) {
     auto next = m_selected;
-    if (!next.removeAll(id))
+    if (next.contains(id)) {
+        QString group;
+        for (const auto& v : selectedObjects())
+            if (v.toObject()["id"] == id)
+                group = outerGroup(v.toObject());
+        for (const auto& v : selectedObjects())
+            if (v.toObject()["id"] == id || (!group.isEmpty() && outerGroup(v.toObject()) == group))
+                next.removeAll(v.toObject()["id"].toString());
+    } else
         next.append(id);
     selectMany(next);
 }
@@ -165,10 +203,172 @@ void Document::selectRectangle(double x, double y, double w, double h, const QSt
         return;
     const auto rectangle = QRectF(x, y, w, h).normalized();
     auto ids = base;
-    for (const auto& v : slide(m_index)["objects"].toArray())
-        if (rectangle.contains(objectBounds(v.toObject())))
-            ids.append(v.toObject()["id"].toString());
+    const auto nodes = slide(m_index)["objects"].toArray();
+    QHash<QString, QRectF> groupBounds;
+    for (const auto& v : nodes) {
+        const auto group = outerGroup(v.toObject());
+        if (!group.isEmpty())
+            groupBounds[group] = groupBounds.value(group).united(objectBounds(v.toObject()));
+    }
+    for (const auto& v : nodes) {
+        const auto node = v.toObject();
+        const auto group = outerGroup(node);
+        if (rectangle.contains(group.isEmpty() ? objectBounds(node) : groupBounds[group]))
+            ids.append(node["id"].toString());
+    }
     selectMany(ids);
+}
+bool Document::canGroup() const {
+    QSet<QString> units;
+    for (const auto& v : selectedObjects()) {
+        const auto node = v.toObject();
+        if (node["groups"].toArray().size() >= MaxGroupDepth)
+            return false;
+        const auto group = outerGroup(node);
+        units.insert(group.isEmpty() ? "object:" + node["id"].toString() : "group:" + group);
+    }
+    return units.size() > 1;
+}
+bool Document::canUngroup() const {
+    for (const auto& v : selectedObjects())
+        if (!outerGroup(v.toObject()).isEmpty())
+            return true;
+    return false;
+}
+bool Document::groupedSelection() const {
+    const auto nodes = selectedObjects();
+    if (nodes.size() < 2)
+        return false;
+    const auto group = outerGroup(nodes.first().toObject());
+    if (group.isEmpty())
+        return false;
+    for (const auto& v : nodes)
+        if (outerGroup(v.toObject()) != group)
+            return false;
+    return true;
+}
+void Document::groupSelection() {
+    if (!canGroup())
+        return;
+    auto s = slide(m_index);
+    auto nodes = s["objects"].toArray();
+    const auto group = uid();
+    checkpoint();
+    m_doc["version"] = 2;
+    for (int i = 0; i < nodes.size(); ++i) {
+        auto node = nodes[i].toObject();
+        if (!m_selected.contains(node["id"].toString()))
+            continue;
+        auto groups = node.value("groups").toArray();
+        groups.prepend(group);
+        node["groups"] = groups;
+        nodes[i] = node;
+    }
+    s["objects"] = nodes;
+    replaceSlide(s);
+    changed();
+    report(QString::number(m_selected.size()) + " objects grouped · Ctrl+Shift+G to ungroup");
+}
+void Document::ungroupSelection() {
+    if (!canUngroup())
+        return;
+    auto s = slide(m_index);
+    auto nodes = s["objects"].toArray();
+    checkpoint();
+    for (int i = 0; i < nodes.size(); ++i) {
+        auto node = nodes[i].toObject();
+        if (!m_selected.contains(node["id"].toString()))
+            continue;
+        auto groups = node.value("groups").toArray();
+        if (groups.isEmpty())
+            continue;
+        groups.removeFirst();
+        if (groups.isEmpty())
+            node.remove("groups");
+        else
+            node["groups"] = groups;
+        nodes[i] = node;
+    }
+    s["objects"] = nodes;
+    replaceSlide(s);
+    changed();
+    report("Ungrouped one level · objects remain selected");
+}
+double Document::constrainSelectionScale(double factor, double anchorX, double anchorY) const {
+    if (m_selected.isEmpty() || !std::isfinite(factor) || !std::isfinite(anchorX) ||
+        !std::isfinite(anchorY) || std::abs(anchorX) > 40000 || std::abs(anchorY) > 40000)
+        return 1;
+    double minimum = 0, maximum = 10000;
+    auto sizeLimit = [&](double value, double low, double high) {
+        if (value > 0) {
+            minimum = std::max(minimum, std::min(low, value) / value);
+            maximum = std::min(maximum, std::max(high, value) / value);
+        }
+    };
+    auto positionLimit = [&](double value, double anchor) {
+        const double delta = value - anchor;
+        if (std::abs(delta) < 1e-12)
+            return;
+        const double a = (-20000. - anchor) / delta, b = (20000. - anchor) / delta;
+        minimum = std::max(minimum, std::min(a, b));
+        maximum = std::min(maximum, std::max(a, b));
+    };
+    for (const auto& v : selectedObjects()) {
+        const auto node = v.toObject();
+        for (auto key : {"w", "h"})
+            sizeLimit(node[key].toDouble(), 16, 10000);
+        if (usesFontSize(node))
+            sizeLimit(node["fontSize"].toDouble(32), 8, 240);
+        for (auto key : {"radius", "strokeWidth"})
+            sizeLimit(node[key].toDouble(), 0, 20000);
+        for (auto key : {"x", "c1x", "c2x"})
+            if (node.contains(key))
+                positionLimit(node[key].toDouble(), anchorX);
+        for (auto key : {"y", "c1y", "c2y"})
+            if (node.contains(key))
+                positionLimit(node[key].toDouble(), anchorY);
+    }
+    return minimum <= maximum ? std::clamp(factor, minimum, maximum) : 1;
+}
+void Document::scaleSelection(double factor, double anchorX, double anchorY) {
+    if (factor <= 0 || !std::isfinite(factor))
+        return;
+    factor = constrainSelectionScale(factor, anchorX, anchorY);
+    if (std::abs(factor - 1) < 1e-9)
+        return;
+    auto s = slide(m_index);
+    auto nodes = s["objects"].toArray();
+    for (int i = 0; i < nodes.size(); ++i) {
+        auto node = nodes[i].toObject();
+        if (!m_selected.contains(node["id"].toString()))
+            continue;
+        for (auto key : {"x", "c1x", "c2x"})
+            if (node.contains(key))
+                node[key] = anchorX + (node[key].toDouble() - anchorX) * factor;
+        for (auto key : {"y", "c1y", "c2y"})
+            if (node.contains(key))
+                node[key] = anchorY + (node[key].toDouble() - anchorY) * factor;
+        for (auto key : {"w", "h", "radius", "strokeWidth"})
+            if (node.contains(key))
+                node[key] = node[key].toDouble() * factor;
+        if (usesFontSize(node))
+            node["fontSize"] = node["fontSize"].toDouble(32) * factor;
+        nodes[i] = node;
+    }
+    s["objects"] = nodes;
+    auto candidate = m_doc;
+    auto slides = candidate["slides"].toArray();
+    slides[m_index] = s;
+    candidate["slides"] = slides;
+    QString why;
+    if (!validate(candidate, &why)) {
+        report("Could not resize selection: " + why);
+        return;
+    }
+    checkpoint();
+    replaceSlide(s);
+    changed();
+    report("Selection resized · proportions preserved");
 }
 void Document::translateSelection(double dx, double dy) {
     if (m_selected.isEmpty() || !std::isfinite(dx) || !std::isfinite(dy))
@@ -478,6 +678,9 @@ bool Document::insertObjects(QJsonArray added) {
     auto checkSlide = makeSlide("blank");
     checkSlide["objects"] = added;
     auto checkDoc = m_doc;
+    for (const auto& v : added)
+        if (!outerGroup(v.toObject()).isEmpty())
+            checkDoc["version"] = 2;
     checkDoc["slides"] = QJsonArray{checkSlide};
     QString why;
     if (!validate(checkDoc, &why)) {
@@ -485,6 +688,7 @@ bool Document::insertObjects(QJsonArray added) {
         return false;
     }
     checkpoint();
+    m_doc["version"] = checkDoc["version"];
     m_selected.clear();
     for (const auto& n : added) {
         nodes.append(n);
@@ -503,10 +707,13 @@ bool Document::copyObject() {
     const auto nodes = selectedObjects();
     if (nodes.isEmpty())
         return false;
+    const int version = canUngroup() ? 2 : 1;
     const QJsonObject payload =
         nodes.size() == 1
-            ? QJsonObject{{"format", "flux-object"}, {"version", 1}, {"object", nodes.first()}}
-            : QJsonObject{{"format", "flux-objects"}, {"version", 1}, {"objects", nodes}};
+            ? QJsonObject{{"format", "flux-object"},
+                          {"version", version},
+                          {"object", nodes.first()}}
+            : QJsonObject{{"format", "flux-objects"}, {"version", version}, {"objects", nodes}};
     const auto bytes = QJsonDocument(payload).toJson(QJsonDocument::Compact);
     if (bytes.size() > MaxFile) {
         report("This object is too large for the clipboard.");
@@ -548,10 +755,11 @@ bool Document::pasteObjectImpl(std::optional<QPointF> position) {
             return false;
         }
         const auto payload = QJsonDocument::fromJson(bytes).object();
-        if (payload["version"].toInt() == 1 && payload["format"] == "flux-object" &&
+        const int version = payload["version"].toInt();
+        if ((version == 1 || version == 2) && payload["format"] == "flux-object" &&
             payload["object"].isObject())
             nodes.append(payload["object"]);
-        else if (payload["version"].toInt() == 1 && payload["format"] == "flux-objects" &&
+        else if ((version == 1 || version == 2) && payload["format"] == "flux-objects" &&
                  payload["objects"].isArray())
             nodes = payload["objects"].toArray();
         if (nodes.isEmpty() || nodes.size() > 250) {
@@ -559,6 +767,7 @@ bool Document::pasteObjectImpl(std::optional<QPointF> position) {
             return false;
         }
         auto validation = m_doc;
+        validation["version"] = version;
         auto page = makeSlide("blank");
         page["objects"] = nodes;
         validation["slides"] = QJsonArray{page};
@@ -584,9 +793,11 @@ bool Document::pasteObjectImpl(std::optional<QPointF> position) {
                                 std::max(0., 1280. - bounds.width()));
     const double y = std::clamp(position ? position->y() : bounds.y() + offset, 0.,
                                 std::max(0., 720. - bounds.height()));
+    QHash<QString, QString> groupIdentities;
     for (int i = 0; i < nodes.size(); ++i) {
         auto n = translated(nodes[i].toObject(), x - bounds.x(), y - bounds.y());
         n["id"] = uid();
+        remapGroups(n, groupIdentities);
         nodes[i] = n;
     }
     if (!insertObjects(nodes))
@@ -659,9 +870,11 @@ void Document::deleteObject() {
 }
 void Document::duplicateObject() {
     auto nodes = selectedObjects();
+    QHash<QString, QString> groupIdentities;
     for (int i = 0; i < nodes.size(); ++i) {
         auto n = translated(nodes[i].toObject(), 24, 24);
         n["id"] = uid();
+        remapGroups(n, groupIdentities);
         nodes[i] = n;
     }
     insertObjects(nodes);
@@ -789,7 +1002,8 @@ bool Document::validate(const QJsonObject& doc, QString* why) {
             *why = s;
         return false;
     };
-    if (doc.value("format") != "flux" || doc.value("version").toInt() != 1)
+    const int version = doc.value("version").toInt();
+    if (doc.value("format") != "flux" || (version != 1 && version != 2))
         return fail("Unsupported Flux format or version.");
     if (doc.value("width").toInt() != 1280 || doc.value("height").toInt() != 720)
         return fail("This version supports 1280 × 720 presentations.");
@@ -808,12 +1022,32 @@ bool Document::validate(const QJsonObject& doc, QString* why) {
         if (!s["objects"].isArray() || s["objects"].toArray().size() > 250)
             return fail("Invalid object list.");
         QSet<QString> ids;
+        QHash<QString, QStringList> groupParents;
+        QHash<QString, int> groupSizes;
         for (auto nv : s["objects"].toArray()) {
             auto n = nv.toObject();
             QString id = n["id"].toString();
             if (id.isEmpty() || ids.contains(id))
                 return fail("Object identities must be unique within a slide.");
             ids.insert(id);
+            if (n.contains("groups") && !n["groups"].isArray())
+                return fail("Invalid group membership.");
+            const auto groups = n.value("groups").toArray();
+            if (!groups.isEmpty() && version < 2)
+                return fail("Groups require Flux file format version 2.");
+            if (groups.size() > MaxGroupDepth)
+                return fail("Groups may be nested up to 16 levels.");
+            QStringList parents;
+            for (const auto& value : groups) {
+                const auto group = value.toString();
+                if (group.isEmpty() || group.size() > 128 || parents.contains(group))
+                    return fail("Invalid or cyclic group identity.");
+                if (groupParents.contains(group) && groupParents[group] != parents)
+                    return fail("A group cannot have different parents.");
+                groupParents[group] = parents;
+                ++groupSizes[group];
+                parents.append(group);
+            }
             if (!kinds.contains(n["kind"].toString()))
                 return fail("Unknown object kind.");
             for (auto key : {"x", "y", "w", "h", "rotation", "opacity", "fontSize", "delay",
@@ -834,6 +1068,9 @@ bool Document::validate(const QJsonObject& doc, QString* why) {
                 !n["source"].toString().startsWith("data:image/png;base64,"))
                 return fail("Images must be embedded PNG assets.");
         }
+        for (auto count : groupSizes)
+            if (count < 2)
+                return fail("A group must contain at least two objects.");
     }
     return true;
 }

@@ -45,6 +45,13 @@ inline void sendKey(QQuickWindow* window, int key,
 // A bounded integration probe for CI. It drives the real Qt Quick application.
 inline void runSmokeTest(QQmlApplicationEngine& engine, Document& deck, int& qmlWarnings) {
     auto failures = std::make_shared<QStringList>();
+    struct ResizeProbe {
+        QJsonObject before;
+        QVariantMap bounds;
+        QPointF releaseAt;
+        double factor = 1;
+    };
+    auto resize = std::make_shared<ResizeProbe>();
     auto root = engine.rootObjects().first();
     auto check = [failures](bool ok, const QString& message) {
         if (!ok)
@@ -447,11 +454,150 @@ inline void runSmokeTest(QQmlApplicationEngine& engine, Document& deck, int& qml
                   "Escape cancels rectangle and restores previous selection");
         }
     });
-    QTimer::singleShot(9100, Qt::PreciseTimer, root, [root, &deck, &qmlWarnings, failures, check] {
+    QTimer::singleShot(9000, Qt::PreciseTimer, root, [root, &deck, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        auto editor = visualItem(window->contentItem(), "editCanvas");
+        deck.selectRectangle(120, 150, 360, 170);
+        if (editor)
+            editor->forceActiveFocus();
+        sendKey(window, Qt::Key_G, Qt::ControlModifier);
+        check(deck.groupedSelection() && deck.selectionCount() == 2,
+              "Ctrl+G groups the selected objects");
+        deck.select("");
+    });
+    QTimer::singleShot(9300, Qt::PreciseTimer, root, [root, &deck, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        auto item = visualItem(window->contentItem(),
+                               "object-" + deck.objects().first().toMap()["id"].toString());
+        clickItem(item);
+        check(deck.groupedSelection() && deck.selectionCount() == 2,
+              "Clicking a member selects the whole group");
+        clickItem(item, Qt::RightButton);
+        auto group = root->findChild<QQuickItem*>("contextGroupSelection");
+        auto ungroup = root->findChild<QQuickItem*>("contextUngroupSelection");
+        check(group && !group->isEnabled() && ungroup && ungroup->isEnabled(),
+              "Context menu offers Ungroup for an existing group");
+    });
+    QTimer::singleShot(9500, Qt::PreciseTimer, root, [root, &deck, check] {
+        clickItem(root->findChild<QQuickItem*>("contextUngroupSelection"));
+        check(!deck.canUngroup() && deck.canGroup() && deck.selectionCount() == 2,
+              "Ungroup menu action preserves the selected objects");
+    });
+    QTimer::singleShot(9700, Qt::PreciseTimer, root, [root, &deck] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        clickItem(visualItem(window->contentItem(),
+                             "object-" + deck.objects().first().toMap()["id"].toString()),
+                  Qt::RightButton);
+    });
+    QTimer::singleShot(9900, Qt::PreciseTimer, root, [root, &deck, check] {
+        clickItem(root->findChild<QQuickItem*>("contextGroupSelection"));
+        check(deck.groupedSelection(), "Group menu action creates a persistent group");
+        if (auto inspector = root->findChild<QObject*>("inspector"))
+            inspector->setProperty("tab", 0);
+    });
+    QTimer::singleShot(10200, Qt::PreciseTimer, root, [root, &deck, resize, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        auto editor = visualItem(window->contentItem(), "editCanvas");
+        auto paper = visualItem(editor, "slidePaper");
+        auto handle = visualItem(editor, "selectionResize-3");
+        check(handle && handle->isVisible() && paper, "Find collective resize corner handle");
+        if (!handle || !paper)
+            return;
+        resize->before = deck.json();
+        resize->bounds = deck.selectionBounds();
+        const double w = resize->bounds["w"].toDouble(), h = resize->bounds["h"].toDouble();
+        const auto start = handle->mapToScene({handle->width() / 2, handle->height() / 2});
+        resize->releaseAt = start + paper->mapToScene({w * .4, h * .4}) - paper->mapToScene({0, 0});
+        sendPointer(window, QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+        sendPointer(window, QEvent::MouseMove, resize->releaseAt, Qt::NoButton, Qt::LeftButton);
+        resize->factor = editor->property("selectionScale").toDouble();
+        check(editor->property("selectionResizing").toBool() && resize->factor > 1.3,
+              "Corner drag previews proportional group resizing");
+        check(deck.json() == resize->before, "Resize preview leaves the saved document untouched");
+    });
+    QTimer::singleShot(10400, Qt::PreciseTimer, root, [root, &deck, resize, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        const auto screenshot = qEnvironmentVariable("FLUX_GROUP_SCREENSHOT");
+        if (!screenshot.isEmpty())
+            check(window->grabWindow().save(screenshot), "Capture group resize framebuffer");
+        sendPointer(window, QEvent::MouseButtonRelease, resize->releaseAt, Qt::LeftButton,
+                    Qt::NoButton);
+        const auto bounds = deck.selectionBounds();
+        check(deck.json() != resize->before && deck.groupedSelection(),
+              "Releasing the corner commits the group resize");
+        check(std::abs(bounds["w"].toDouble() - resize->bounds["w"].toDouble() * resize->factor) <
+                      .01 &&
+                  std::abs(bounds["h"].toDouble() -
+                           resize->bounds["h"].toDouble() * resize->factor) < .01 &&
+                  std::abs(bounds["x"].toDouble() - resize->bounds["x"].toDouble()) < .01 &&
+                  std::abs(bounds["y"].toDouble() - resize->bounds["y"].toDouble()) < .01,
+              "Resize keeps proportions and the opposite corner fixed");
+        const auto after = deck.json();
+        deck.undo();
+        check(deck.json() == resize->before, "One undo restores the entire group resize");
+        deck.redo();
+        check(deck.json() == after, "Redo restores the resized group");
+    });
+    QTimer::singleShot(10700, Qt::PreciseTimer, root, [root, &deck, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        auto editor = visualItem(window->contentItem(), "editCanvas");
+        auto handle = visualItem(editor, "selectionResize-0");
+        check(handle && handle->isVisible(), "Find opposite corner for resize cancellation");
+        if (!handle)
+            return;
+        const auto before = deck.json();
+        const auto start = handle->mapToScene({handle->width() / 2, handle->height() / 2});
+        const auto end = start - QPointF(30, 12);
+        sendPointer(window, QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+        sendPointer(window, QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
+        check(editor->property("selectionScale").toDouble() > 1, "Top-left handle also resizes");
+        sendKey(window, Qt::Key_Escape);
+        sendPointer(window, QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+        check(deck.json() == before && deck.groupedSelection() &&
+                  !editor->property("selectionResizing").toBool() &&
+                  editor->property("selectionScale").toDouble() == 1,
+              "Escape cancels resizing without losing the group selection");
+    });
+    QTimer::singleShot(11000, Qt::PreciseTimer, root, [root, &deck, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        auto editor = visualItem(window->contentItem(), "editCanvas");
+        auto handle = visualItem(editor, "selectionResize-1");
+        check(handle && handle->isVisible(), "Find corner for lost-grab cancellation");
+        if (!handle)
+            return;
+        const auto before = deck.json();
+        const auto start = handle->mapToScene({handle->width() / 2, handle->height() / 2});
+        const auto end = start + QPointF(30, -12);
+        sendPointer(window, QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+        sendPointer(window, QEvent::MouseMove, end, Qt::NoButton, Qt::LeftButton);
+        check(editor->property("selectionResizing").toBool(), "Resize owns an active pointer grab");
+        if (auto grabber = window->mouseGrabberItem())
+            grabber->ungrabMouse();
+        sendPointer(window, QEvent::MouseButtonRelease, end, Qt::LeftButton, Qt::NoButton);
+        check(deck.json() == before && !editor->property("selectionResizing").toBool(),
+              "Losing the pointer grab cancels without a partial document edit");
+    });
+    QTimer::singleShot(11300, Qt::PreciseTimer, root, [root, &deck, check] {
+        auto window = qobject_cast<QQuickWindow*>(root);
+        sendKey(window, Qt::Key_G, Qt::ControlModifier | Qt::ShiftModifier);
+        check(deck.canGroup() && !deck.canUngroup(), "Ctrl+Shift+G ungroups the selection");
+        sendKey(window, Qt::Key_G, Qt::ControlModifier);
+        const auto before = deck.json();
+        sendKey(window, Qt::Key_D, Qt::ControlModifier);
+        check(deck.objects().size() == 5 && deck.groupedSelection(),
+              "Keyboard duplicate creates a new group");
+        deck.select(deck.objects().first().toMap()["id"].toString());
+        check(deck.selectionCount() == 2, "Duplicated group does not join its source group");
+        deck.undo();
+        check(deck.json() == before && deck.selectionCount() == 2,
+              "Duplicate group undoes in one step");
+    });
+    QTimer::singleShot(11800, Qt::PreciseTimer, root, [root, &deck, &qmlWarnings, failures, check] {
         check(qmlWarnings == 0, "No QML runtime warnings");
         deck.cleanupRecovery();
         if (failures->isEmpty())
-            qInfo("Flux UI smoke passed: rectangle selection, batch edits, reverse transitions, "
+            qInfo("Flux UI smoke passed: grouping, collective resize and cancellation, "
+                  "rectangle selection, batch edits, reverse transitions, "
                   "context menus, clipboard, keyboard, content, notes, presentation.");
         else
             for (const auto& failure : *failures)

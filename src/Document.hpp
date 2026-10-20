@@ -20,6 +20,9 @@ class Document final : public QObject {
     Q_PROPERTY(QStringList selectedIds READ selectedIds NOTIFY selectionChanged)
     Q_PROPERTY(int selectionCount READ selectionCount NOTIFY selectionChanged)
     Q_PROPERTY(QVariantMap selectionBounds READ selectionBounds NOTIFY selectionChanged)
+    Q_PROPERTY(bool canGroup READ canGroup NOTIFY selectionChanged)
+    Q_PROPERTY(bool canUngroup READ canUngroup NOTIFY selectionChanged)
+    Q_PROPERTY(bool groupedSelection READ groupedSelection NOTIFY selectionChanged)
     Q_PROPERTY(int slideIndex READ slideIndex WRITE setSlideIndex NOTIFY documentChanged)
     Q_PROPERTY(QString title READ title WRITE setTitle NOTIFY documentChanged)
     Q_PROPERTY(QString filePath READ filePath NOTIFY fileChanged)
@@ -39,6 +42,9 @@ class Document final : public QObject {
     QStringList selectedIds() const { return m_selected; }
     int selectionCount() const { return m_selected.size(); }
     QVariantMap selectionBounds() const;
+    bool canGroup() const;
+    bool canUngroup() const;
+    bool groupedSelection() const;
     int slideIndex() const { return m_index; }
     void setSlideIndex(int i);
     QString title() const;
@@ -57,6 +63,10 @@ class Document final : public QObject {
     Q_INVOKABLE void selectRectangle(double x, double y, double w, double h,
                                      const QStringList& base = {});
     Q_INVOKABLE void translateSelection(double dx, double dy);
+    Q_INVOKABLE void groupSelection();
+    Q_INVOKABLE void ungroupSelection();
+    Q_INVOKABLE double constrainSelectionScale(double factor, double anchorX, double anchorY) const;
+    Q_INVOKABLE void scaleSelection(double factor, double anchorX, double anchorY);
     Q_INVOKABLE void addObject(const QString& kind);
     Q_INVOKABLE void addObjectAt(const QString& kind, double x, double y);
     Q_INVOKABLE void updateObject(const QString& id, const QVariantMap& changes);

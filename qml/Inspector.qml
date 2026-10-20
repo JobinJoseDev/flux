@@ -62,7 +62,7 @@ Rectangle {
                     height: 2
                 }
                 Text {
-                    text: deck.selectionCount > 1 ? deck.selectionCount + " OBJECTS SELECTED" : inspector.hasSelection ? (inspector.selection.kind || "Object").toUpperCase() : "SLIDE " + (deck.slideIndex + 1)
+                    text: deck.selectionCount > 1 ? (deck.groupedSelection ? "GROUP · " : "") + deck.selectionCount + " OBJECTS" : inspector.hasSelection ? (inspector.selection.kind || "Object").toUpperCase() : "SLIDE " + (deck.slideIndex + 1)
                     color: "#8edbd3"
                     font.pixelSize: 11
                     font.letterSpacing: 1.5
@@ -72,7 +72,7 @@ Rectangle {
                     Layout.fillWidth: true
                     spacing: 12
                     Text {
-                        text: "Drag a selected object to move the selection. Shift or Ctrl-click to add or remove objects."
+                        text: deck.groupedSelection ? "Click any member to select the group. Drag to move it; use a corner handle to resize. Ungroup to edit individual objects." : "Drag a selected object to move the selection. Use a corner handle to resize everything proportionally."
                         color: "#a8bfcc"
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true
@@ -81,6 +81,53 @@ Rectangle {
                         text: "Duplicate selection"
                         Layout.fillWidth: true
                         onClicked: deck.duplicateObject()
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Tool {
+                            text: "Group"
+                            enabled: deck.canGroup
+                            Layout.fillWidth: true
+                            onClicked: deck.groupSelection()
+                        }
+                        Tool {
+                            text: "Ungroup"
+                            enabled: deck.canUngroup
+                            Layout.fillWidth: true
+                            onClicked: deck.ungroupSelection()
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        ValueField {
+                            label: "Width"
+                            value: deck.selectionBounds.w
+                            minimum: 1
+                            maximum: 40000
+                            Layout.fillWidth: true
+                            onEdited: function (number) {
+                                var b = deck.selectionBounds;
+                                deck.scaleSelection(number / b.w, b.x, b.y);
+                            }
+                        }
+                        ValueField {
+                            label: "Height"
+                            value: deck.selectionBounds.h
+                            minimum: 1
+                            maximum: 40000
+                            Layout.fillWidth: true
+                            onEdited: function (number) {
+                                var b = deck.selectionBounds;
+                                deck.scaleSelection(number / b.h, b.x, b.y);
+                            }
+                        }
+                    }
+                    Text {
+                        text: "Proportions locked · text scales too"
+                        color: "#849eaf"
+                        font.pixelSize: 11
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                     Tool {
                         text: "Center horizontally"
@@ -98,7 +145,7 @@ Rectangle {
                         onClicked: deck.deleteObject()
                     }
                     Text {
-                        text: "Copy / paste: Ctrl+C / Ctrl+V\nNudge: arrows · Shift for 10 pixels\nSelect all: Ctrl+A · Clear: Escape"
+                        text: "Group: Ctrl+G · Ungroup: Ctrl+Shift+G\nCopy / paste: Ctrl+C / Ctrl+V\nNudge: arrows · Shift for 10 pixels\nEscape cancels resizing"
                         color: "#849eaf"
                         wrapMode: Text.WordWrap
                         Layout.fillWidth: true

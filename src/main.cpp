@@ -16,7 +16,7 @@ int main(int argc, char* argv[]) {
     QGuiApplication app(argc, argv);
     QCoreApplication::setApplicationName("Flux");
     QCoreApplication::setOrganizationName("Flux");
-    QCoreApplication::setApplicationVersion("0.1.2");
+    QCoreApplication::setApplicationVersion("0.2.0");
     QGuiApplication::setDesktopFileName("io.fluxpresent.Flux");
     QQuickStyle::setStyle("Fusion");
     QCommandLineParser parser;

@@ -1,7 +1,7 @@
 # Flux
 
 An offline presentation editor for Linux, built with C++20 and Qt Quick/QML.
-This is **version 0.1.2**, a working foundation with real editing, object-based
+This is **version 0.2.0**, a working foundation with real editing, object-based
 Morph, curved motion paths, technical content, and a presenter window.
 
 ## Build and install on Fedora
@@ -70,6 +70,7 @@ updates the executable in `~/.local`; it does not remove your project files.
 | Editing | Drag, resize, Shift-constrained resize, numeric geometry and rotation, keyboard nudge, color, opacity, text size/weight/alignment, layers, alignment, duplicate/delete |
 | Context menus | Right-click objects, slide thumbnails, or empty canvas; keyboard Menu / Shift+F10 also opens the relevant menu |
 | Selection | Drag a rectangle around objects; Shift/Ctrl-click, additive rectangles, Ctrl+A, selection outlines; move, nudge, duplicate, delete and align the whole selection |
+| Groups and resizing | Persistent nested groups; Group/Ungroup menus and shortcuts; four proportional resize handles and numeric width/height for any multi-selection |
 | Clipboard | Cut/copy/paste native selections, including embedded images, across slides or Flux windows; paste external plain text as a text box |
 | Slide management | Add, duplicate, delete, reorder; 6 layouts including a blank canvas |
 | Morph | Stable IDs, position/size/rotation/color/opacity interpolation, text/content crossfades, appearing/disappearing objects |
@@ -85,7 +86,7 @@ updates the executable in `~/.local`; it does not remove your project files.
 
 | Where | Available actions |
 |---|---|
-| Object | Edit content/data, cut/copy/paste, duplicate/delete, arrange layers, align to slide, format, motion settings, break a previous-slide Morph match |
+| Object | Edit content/data, cut/copy/paste, duplicate/delete, group/ungroup, arrange layers, align to slide, format, motion settings, break a previous-slide Morph match |
 | Empty canvas or workspace | Paste here, insert text/shapes/code/equations/charts/tables or import an image, undo/redo, toggle grid and snap, slide settings, notes |
 | Slide thumbnail | New blank slide, duplicate, rename, move earlier/later, notes, present from here, delete |
 
@@ -100,7 +101,7 @@ thumbnail reached with Tab.
 **Ctrl+X / Ctrl+C / Ctrl+V** operate on objects while the canvas has focus.
 Text fields keep their normal text clipboard shortcuts. Native clipboard
 copies preserve styling, content, embedded images, and motion settings.
-Every paste gets a fresh object identity; duplicate a **slide** when you want
+Every paste gets fresh object and group identities; duplicate a **slide** when you want
 to preserve identities for Morph. Clipboard image data from other applications
 is not supported yet; use **Insert → Image** instead.
 
@@ -112,19 +113,48 @@ See [CHANGELOG.md](CHANGELOG.md) for the patch and next milestones.
 Drag from empty canvas or the surrounding workspace to draw a selection
 rectangle. Objects must be fully enclosed, including their rotated bounds.
 The gesture works in either direction. Hold **Shift** or **Ctrl** while
-drawing to add to the current selection; Shift/Ctrl-click toggles individual
-objects. **Ctrl+A** selects all objects on the current slide.
+drawing to add to the current selection; Shift/Ctrl-click toggles objects or
+whole groups. A rectangle must enclose the whole group to select it.
+**Ctrl+A** selects all objects on the current slide.
 
 Drag any selected object to move the selection together. Arrow keys nudge it;
 Shift+arrows move 10 pixels. Duplicate, delete, cut, paste, and alignment to
 the slide apply to the whole selection. Each operation is one undo step.
 **Escape** cancels an active rectangle and restores the previous selection;
-otherwise it clears the selection. Persistent grouping, collective resizing,
-and distribution are still planned. The single-object inspector remains
+otherwise it clears the selection. The single-object inspector remains
 available when exactly one object is selected.
 
 See [docs/rectangle-selection.png](docs/rectangle-selection.png) for the
 native selection UI.
+
+## Groups and proportional resizing
+
+![Group resize in the native editor](docs/group-resize.png)
+
+Select two or more objects and press **Ctrl+G**, or right-click and choose
+**Group**. Clicking any member then selects the whole group. Groups survive
+save/reopen, copy/paste, duplication, and undo/redo. Grouping an existing group
+with another object nests it; **Ctrl+Shift+G** or **Ungroup** removes one level
+at a time. Ungroup to edit individual members. Groups may nest up to 16 levels.
+
+Drag any of the four corner handles to resize a group or a temporary
+multi-selection. The opposite corner stays fixed and proportions are locked,
+including for rotated objects. Text size, stroke widths, corner radii, and
+Bézier control points scale with the objects. The inspector's Width or Height
+field scales both dimensions from the top-left of the selection bounds.
+Existing size and font limits constrain the entire selection together.
+
+Dragging previews the result without changing the document. Release commits
+one undo step; **Escape** or a lost pointer grab cancels it. Grouping preserves
+object IDs and layer order, so duplicating a slide still creates Morph matches.
+Collective rotation, stretching along only one axis, and distribution between
+objects are future work.
+
+Existing version-1 `.flux` decks open normally. Creating or pasting a group
+upgrades that deck to **file format version 2**, which requires Flux 0.2 or
+later to reopen. Ungrouping does not downgrade the file. Decks that have never
+used groups remain version 1. This prevents older apps from silently editing
+a grouped deck without understanding its structure.
 
 ## Going backward in a presentation
 
@@ -139,7 +169,7 @@ not replay that slide's entrance animations. Forward navigation still runs
 entrances after the transition. This fixes the earlier implementation, which
 explicitly bypassed backward transitions. No enable switch is needed.
 
-## Important boundaries in 0.1
+## Important boundaries in 0.2
 
 - This is an early native application, not complete PowerPoint parity.
 - PPTX import/export, video export, audio/video, collaboration, and master
@@ -151,7 +181,7 @@ explicitly bypassed backward transitions. No enable switch is needed.
   comparison symbols. No external TeX installation or executable macros.
 - Code highlighting is lexical and language-agnostic; it is not an IDE.
 - Diagram arrows are independent objects, not connectors that stay attached
-  to shapes. Persistent grouping and multi-object resizing are future work.
+  to shapes.
 - Chart data uses `label,value` per line (not general CSV), up to 32 points.
   Tables use tab-separated cells and newline-separated rows, up to 40 × 16.
 - Morph resizes visual content with transforms; complex chart/table/text
@@ -204,7 +234,7 @@ cmake --build build-core
 ctest --test-dir build-core --output-on-failure
 
 # Start the real UI without a display server for a smoke test
-QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./build/flux --smoke-test
+QT_FORCE_STDERR_LOGGING=1 QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software ./build/flux --smoke-test
 
 # Open an existing project
 ./build/flux /path/to/deck.flux

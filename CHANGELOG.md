@@ -1,5 +1,23 @@
 # Flux changes
 
+## 0.2.0 — persistent groups and collective resizing
+
+- Group/Ungroup through the right-click menu, inspector, Ctrl+G and Ctrl+Shift+G.
+- Nested groups preserve their structure; ungrouping removes one level.
+  Clicking, toggling, and rectangle selection treat each outer group as a unit.
+- Four corner handles proportionally resize groups and temporary selections.
+  The opposite corner stays fixed; text, strokes, radii, and path controls scale.
+- Width and height fields offer the same proportional resize numerically.
+- Live previews commit once on release; Escape or a lost pointer grab cancels.
+- Grouping and resizing preserve Morph identities. Copies receive independent
+  object and group IDs; slide duplicates retain both.
+- File format v2 stores group paths and validates nesting. Existing v1 decks
+  still load and stay v1 until groups are used. Grouped clipboard data uses v2.
+- Tests cover persistence, nesting, clipboard isolation, invalid hierarchies,
+  geometry, limits, Morph, undo/redo, menu and keyboard actions, and real drags.
+- Retains the Fedora CI fix forcing Qt diagnostics onto stderr. The expanded
+  smoke test keeps its success marker and has a 30-second timeout.
+
 ## 0.1.2 — rectangle selection and reverse transitions
 
 - Drag a rectangle in either direction to select fully enclosed objects,
@@ -32,8 +50,7 @@
 
 ## Next milestones
 
-1. Persistent grouping/ungrouping, collective resizing, and alignment and
-   distribution between objects.
+1. Alignment and distribution between objects, followed by richer group editing.
 2. Motion authoring: visible draggable path handles, click-triggered builds,
    and a clearer animation sequence editor.
 3. Fedora release hardening: fonts, display routing, recovery, larger decks,

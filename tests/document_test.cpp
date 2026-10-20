@@ -8,6 +8,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <cmath>
+#include <limits>
 
 class DocumentTest : public QObject {
     Q_OBJECT
@@ -288,6 +290,245 @@ class DocumentTest : public QObject {
         QCOMPARE(d.selectionCount(), 3);
         d.setSlideIndex(0);
         QCOMPARE(d.selectionCount(), 0);
+        d.cleanupRecovery();
+    }
+    void groupsSelectionPersistenceAndUndo() {
+        Document d;
+        d.addSlide("blank");
+        for (int i = 0; i < 3; ++i) {
+            d.addObjectAt("rect", 100 + 200 * i, 100);
+            d.updateObject(d.selectedId(), {{"w", 100}, {"h", 100}});
+        }
+        const auto first = d.objects()[0].toMap()["id"].toString();
+        const auto second = d.objects()[1].toMap()["id"].toString();
+        const auto third = d.objects()[2].toMap()["id"].toString();
+        const auto old = d.json();
+        d.selectMany({first, second});
+        QVERIFY(d.canGroup());
+        d.groupSelection();
+        const auto grouped = d.json();
+        QCOMPARE(grouped["version"].toInt(), 2);
+        QVERIFY(d.groupedSelection() && d.canUngroup() && !d.canGroup());
+        d.undo();
+        QCOMPARE(d.json(), old);
+        d.redo();
+        QCOMPARE(d.json(), grouped);
+        d.select(first);
+        QCOMPARE(d.selectionCount(), 2);
+        d.toggleSelection(second);
+        QCOMPARE(d.selectionCount(), 0);
+        d.selectRectangle(90, 90, 120, 120);
+        QCOMPARE(d.selectionCount(), 0); // One enclosed member does not select half a group.
+        d.selectRectangle(90, 90, 320, 120);
+        QCOMPARE(d.selectionCount(), 2);
+        d.toggleSelection(third);
+        QCOMPARE(d.selectionCount(), 3);
+        d.ungroupSelection();
+        QVERIFY(!d.canUngroup());
+        QCOMPARE(d.selectionCount(), 3);
+        d.undo();
+        QCOMPARE(d.json(), grouped);
+        QTemporaryDir tmp;
+        const auto path = QUrl::fromLocalFile(tmp.filePath("groups.flux"));
+        QVERIFY(d.save(path));
+        Document loaded;
+        QVERIFY(loaded.open(path));
+        QCOMPARE(loaded.json(), grouped);
+        loaded.setSlideIndex(d.slideIndex());
+        loaded.select(second);
+        QCOMPARE(loaded.selectionCount(), 2);
+        QFile v1(tmp.filePath("v1.flux"));
+        QVERIFY(v1.open(QIODevice::WriteOnly));
+        v1.write(QJsonDocument(old).toJson());
+        v1.close();
+        QVERIFY(loaded.open(QUrl::fromLocalFile(v1.fileName())));
+        QCOMPARE(loaded.json(), old);
+        d.cleanupRecovery();
+        loaded.cleanupRecovery();
+    }
+    void nestedGroupsClipboardAndDuplication() {
+        Document d;
+        d.addSlide("blank");
+        d.addObject("rect");
+        const auto first = d.selectedId();
+        d.addObject("ellipse");
+        d.selectAll();
+        d.groupSelection();
+        const auto inner = d.objects()[0].toMap()["groups"].toList()[0];
+        d.addObject("text");
+        d.selectAll();
+        d.groupSelection();
+        const auto original = d.objects();
+        QCOMPARE(original[0].toMap()["groups"].toList().size(), 2);
+        QVERIFY(d.copyObject());
+        const auto payload = QJsonDocument::fromJson(QGuiApplication::clipboard()->mimeData()->data(
+                                                         "application/x-flux-object+json"))
+                                 .object();
+        QCOMPARE(payload["version"].toInt(), 2);
+        const auto before = d.json();
+        d.duplicateObject();
+        QCOMPARE(d.objects().size(), 6);
+        QCOMPARE(d.selectionCount(), 3);
+        const auto copy = d.objects()[3].toMap();
+        QVERIFY(copy["id"] != original[0].toMap()["id"]);
+        QVERIFY(copy["groups"].toList()[0] != original[0].toMap()["groups"].toList()[0]);
+        QVERIFY(copy["groups"].toList()[1] != inner);
+        d.select(first);
+        QCOMPARE(d.selectionCount(), 3);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        d.ungroupSelection();
+        d.select(first);
+        QCOMPARE(d.selectionCount(), 2);
+        QCOMPARE(d.objects()[0].toMap()["groups"].toList()[0], inner);
+        d.ungroupSelection();
+        d.select(first);
+        QCOMPARE(d.selectionCount(), 1);
+        Document pasted;
+        pasted.addSlide("blank");
+        QCOMPARE(pasted.json()["version"].toInt(), 1);
+        QVERIFY(pasted.pasteObject());
+        QCOMPARE(pasted.json()["version"].toInt(), 2);
+        QCOMPARE(pasted.selectionCount(), 3);
+        QVERIFY(pasted.groupedSelection());
+        pasted.ungroupSelection();
+        pasted.select(pasted.objects()[0].toMap()["id"].toString());
+        QCOMPARE(pasted.selectionCount(), 2);
+        d.cleanupRecovery();
+        pasted.cleanupRecovery();
+    }
+    void collectiveResizeGeometryUndoAndMorph() {
+        Document d;
+        d.addSlide("blank");
+        d.addObjectAt("rect", 100, 120);
+        const auto rect = d.selectedId();
+        d.updateObject(
+            rect, {{"w", 80}, {"h", 60}, {"rotation", 30}, {"strokeWidth", 3}, {"radius", 12}});
+        d.addObjectAt("text", 300, 160);
+        const auto text = d.selectedId();
+        d.updateObject(text, {{"w", 160},
+                              {"h", 100},
+                              {"fontSize", 24},
+                              {"path", "bezier"},
+                              {"c1x", 280},
+                              {"c1y", 110},
+                              {"c2x", 400},
+                              {"c2y", 200}});
+        d.addObject("ellipse");
+        d.selectMany({rect, text});
+        d.groupSelection();
+        d.duplicateSlide();
+        d.select(rect);
+        const auto before = d.json();
+        const auto nodes = d.objects();
+        const auto bounds = d.selectionBounds();
+        const double ax = bounds["x"].toDouble(), ay = bounds["y"].toDouble();
+        QSignalSpy changes(&d, &Document::documentChanged);
+        d.scaleSelection(1.5, ax, ay);
+        QCOMPARE(changes.size(), 1);
+        const auto scaled = d.objects();
+        const auto after = d.json();
+        for (int i = 0; i < 2; ++i) {
+            const auto a = nodes[i].toMap(), b = scaled[i].toMap();
+            QCOMPARE(b["id"], a["id"]);
+            QCOMPARE(b["groups"], a["groups"]);
+            QCOMPARE(b["w"].toDouble(), a["w"].toDouble() * 1.5);
+            QCOMPARE(b["h"].toDouble(), a["h"].toDouble() * 1.5);
+            QCOMPARE(b["x"].toDouble(), ax + (a["x"].toDouble() - ax) * 1.5);
+            QCOMPARE(b["y"].toDouble(), ay + (a["y"].toDouble() - ay) * 1.5);
+        }
+        QCOMPARE(scaled[0].toMap()["rotation"].toDouble(), 30.);
+        QCOMPARE(scaled[0].toMap()["strokeWidth"].toDouble(), 4.5);
+        QCOMPARE(scaled[0].toMap()["radius"].toDouble(), 18.);
+        QCOMPARE(scaled[1].toMap()["fontSize"].toDouble(), 36.);
+        QCOMPARE(scaled[1].toMap()["c1x"].toDouble(), ax + (280 - ax) * 1.5);
+        QCOMPARE(scaled[1].toMap()["c2y"].toDouble(), ay + (200 - ay) * 1.5);
+        QCOMPARE(scaled[2], nodes[2]);
+        const auto newBounds = d.selectionBounds();
+        QVERIFY(std::abs(newBounds["x"].toDouble() - ax) < 1e-8);
+        QVERIFY(std::abs(newBounds["w"].toDouble() - bounds["w"].toDouble() * 1.5) < 1e-8);
+        const auto tracks = d.morphTracks(d.slideIndex());
+        QCOMPARE(tracks.size(), 3);
+        for (const auto& value : tracks) {
+            const auto track = value.toMap();
+            QCOMPARE(track["from"].toMap()["id"], track["to"].toMap()["id"]);
+            if (track["to"].toMap()["id"] == text) {
+                QCOMPARE(track["from"].toMap()["fontSize"].toDouble(), 24.);
+                QCOMPARE(track["to"].toMap()["fontSize"].toDouble(), 36.);
+            }
+        }
+        QVERIFY(Document::validate(after));
+        d.undo();
+        QCOMPARE(d.json(), before);
+        d.redo();
+        QCOMPARE(d.json(), after);
+        d.scaleSelection(1, ax, ay);
+        d.scaleSelection(-1, ax, ay);
+        d.scaleSelection(std::numeric_limits<double>::quiet_NaN(), ax, ay);
+        d.scaleSelection(2, std::numeric_limits<double>::infinity(), ay);
+        QCOMPARE(d.json(), after);
+        d.undo();
+        QCOMPARE(d.json(), before); // Invalid/no-op resizes do not add history entries.
+        d.cleanupRecovery();
+    }
+    void collectiveResizeLimitsAndUngroupedSelection() {
+        Document d;
+        d.addSlide("blank");
+        d.addObjectAt("text", 100, 100);
+        d.updateObject(d.selectedId(), {{"w", 100}, {"h", 100}, {"fontSize", 24}});
+        d.addObjectAt("rect", 300, 100);
+        d.updateObject(d.selectedId(), {{"w", 100}, {"h", 100}});
+        d.selectAll();
+        const auto before = d.json();
+        QCOMPARE(d.constrainSelectionScale(100, 0, 0), 10.);
+        d.scaleSelection(100, 0, 0);
+        QCOMPARE(d.objects()[0].toMap()["fontSize"].toDouble(), 240.);
+        QCOMPARE(d.objects()[1].toMap()["x"].toDouble(), 3000.);
+        QCOMPARE(d.json()["version"].toInt(), 1);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        d.scaleSelection(.01, 0, 0);
+        QCOMPARE(d.objects()[0].toMap()["fontSize"].toDouble(), 8.);
+        QCOMPARE(d.objects()[1].toMap()["x"].toDouble(), 100.);
+        QVERIFY(Document::validate(d.json()));
+        d.cleanupRecovery();
+    }
+    void rejectInvalidGroupHierarchies() {
+        Document d;
+        d.addSlide("blank");
+        d.addObject("rect");
+        d.addObject("rect");
+        d.selectAll();
+        d.groupSelection();
+        const auto good = d.json();
+        auto withGroups = [&](QJsonValue first, QJsonValue second, int version = 2) {
+            auto doc = good;
+            auto slides = doc["slides"].toArray();
+            auto page = slides.last().toObject();
+            auto nodes = page["objects"].toArray();
+            auto a = nodes[0].toObject(), b = nodes[1].toObject();
+            a["groups"] = first;
+            b["groups"] = second;
+            nodes[0] = a;
+            nodes[1] = b;
+            page["objects"] = nodes;
+            slides[slides.size() - 1] = page;
+            doc["slides"] = slides;
+            doc["version"] = version;
+            return doc;
+        };
+        QVERIFY(Document::validate(good));
+        QVERIFY(!Document::validate(withGroups("bad", QJsonArray{})));
+        QVERIFY(!Document::validate(withGroups(QJsonArray{"a"}, QJsonArray{"a"}, 1)));
+        QVERIFY(!Document::validate(withGroups(QJsonArray{"a"}, QJsonArray{})));
+        QVERIFY(!Document::validate(withGroups(QJsonArray{"a", "a"}, QJsonArray{"a", "a"})));
+        QVERIFY(!Document::validate(withGroups(QJsonArray{"a", "b"}, QJsonArray{"b"})));
+        QJsonArray deep;
+        for (int i = 0; i < 16; ++i)
+            deep.append(QString::number(i));
+        QVERIFY(Document::validate(withGroups(deep, deep)));
+        deep.append("too deep");
+        QVERIFY(!Document::validate(withGroups(deep, deep)));
         d.cleanupRecovery();
     }
     void batchPasteCapacityIsAtomic() {

@@ -1,4 +1,4 @@
-# Verification for Flux 0.1.2
+# Verification for Flux 0.2.0
 
 ## Environment
 
@@ -6,12 +6,36 @@
 - GCC 13.3, C++20, Release configuration
 - Qt 6.8.3, CMake 4.4, GNU Make for the local validation build
 - Qt offscreen platform with software rendering for UI checks
-- The Fedora install script selects Ninja; native Fedora execution is pending.
+- The Fedora install script selects Ninja.
+- Published baseline `9e1dd33` passed Fedora CI, including all three CTest
+  targets: https://github.com/JobinJoseDev/flux/actions/runs/39388712353.
+  The v0.2 changes below are validated locally; their Fedora CI run is pending push.
 
 The Qt SDK and build tooling were obtained only for development. They are not
 included in the source bundle and are not runtime services used by Flux.
 
-## Passed
+## Regression coverage
+
+The existing suite is retained. The v0.2 run covers the following new behavior
+in addition to the original checks listed below:
+
+- Groups: selection as a unit, full rectangle enclosure, nesting, one-level
+  ungrouping, version upgrade/undo, save/reopen, and v1 compatibility.
+- Clipboard: independent object/group IDs on copy and duplicate, nested
+  structure preservation, and importing a group into a v1 deck.
+- Validation: rejects non-array memberships, cycles, inconsistent parents,
+  single-member groups, v1 group payloads, and excessive nesting.
+- Resize: rotated bounds, fixed anchor, shared scale limits, font/stroke/radius
+  and Bézier-control scaling, unselected-object preservation, stable Morph
+  matches, one-step undo/redo, and non-finite/no-op input handling.
+- Real QML input: Group/Ungroup menu clicks and shortcuts, whole-group click
+  selection, corner-drag preview and commit, Escape and lost-grab cancellation,
+  keyboard duplication, and zero QML runtime warnings.
+
+The group-resize screenshot is an actual 1440 × 960 native framebuffer,
+captured through the smoke test and visually inspected.
+
+## Existing checks retained
 
 | Check | Evidence |
 |---|---|
@@ -28,7 +52,9 @@ included in the source bundle and are not runtime services used by Flux.
 | Installer and metadata | Fedora install script passes `bash -n`; desktop MIME/AppStream XML parses |
 
 CTest contains three targets: `motion`, `document`, and `qml-smoke`. All
-passed. The UI test additionally requires its explicit completion message,
+passed in the v0.2 local Release build: 1,018 motion checks, 13 document test
+cases (plus setup/cleanup), and the expanded 11.96-second UI probe. Total
+CTest time was 12.26 seconds. The UI test additionally requires its explicit completion message,
 so an empty or non-running executable cannot silently satisfy the check.
 
 ## Still requires a Fedora device

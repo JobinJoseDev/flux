@@ -10,6 +10,9 @@ Item {
     property bool guideY: false
     property real dragDx: 0
     property real dragDy: 0
+    property bool selectionResizing: false
+    property real selectionScale: 1
+    property point resizeAnchor: Qt.point(0, 0)
     property bool gestureCanceled: false
     property bool marqueeActive: false
     property point marqueeStart
@@ -24,6 +27,19 @@ Item {
     }
     function nudge(dx, dy) {
         deck.translateSelection(dx, dy);
+    }
+    function cancelSelectionResize() {
+        selectionResizing = false;
+        selectionScale = 1;
+    }
+    Connections {
+        target: deck
+        function onDocumentChanged() {
+            editor.cancelSelectionResize();
+        }
+        function onSelectionChanged() {
+            editor.cancelSelectionResize();
+        }
     }
     function openKeyboardMenu() {
         if (deck.selectedId) {
@@ -64,7 +80,9 @@ Item {
             removeRequested();
             event.accepted = true;
         } else if (event.key === Qt.Key_Escape) {
-            if (background.pressed) {
+            if (selectionResizing) {
+                cancelSelectionResize();
+            } else if (background.pressed) {
                 gestureCanceled = true;
                 marqueeActive = false;
                 deck.selectMany(background.originalSelection);
@@ -162,10 +180,11 @@ Item {
                 property real dw: 0
                 property real dh: 0
                 property bool selected: deck.selectedIds.indexOf(modelData.id) >= 0
-                x: modelData.x + (selected ? editor.dragDx : 0)
-                y: modelData.y + (selected ? editor.dragDy : 0)
-                width: modelData.w + dw
-                height: modelData.h + dh
+                property real resizeScale: selected ? editor.selectionScale : 1
+                x: selected && editor.selectionResizing ? editor.resizeAnchor.x + (modelData.x - editor.resizeAnchor.x) * resizeScale : modelData.x + (selected ? editor.dragDx : 0)
+                y: selected && editor.selectionResizing ? editor.resizeAnchor.y + (modelData.y - editor.resizeAnchor.y) * resizeScale : modelData.y + (selected ? editor.dragDy : 0)
+                width: modelData.w * resizeScale + dw
+                height: modelData.h * resizeScale + dh
                 rotation: modelData.rotation || 0
                 NodeVisual {
                     node: item.modelData
@@ -286,16 +305,83 @@ Item {
             }
         }
         Rectangle {
+            id: selectionFrame
             objectName: "selectionBounds"
             visible: deck.selectionCount > 1
-            x: deck.selectionBounds.x + editor.dragDx
-            y: deck.selectionBounds.y + editor.dragDy
-            width: deck.selectionBounds.w
-            height: deck.selectionBounds.h
+            x: editor.selectionResizing ? editor.resizeAnchor.x + (deck.selectionBounds.x - editor.resizeAnchor.x) * editor.selectionScale : deck.selectionBounds.x + editor.dragDx
+            y: editor.selectionResizing ? editor.resizeAnchor.y + (deck.selectionBounds.y - editor.resizeAnchor.y) * editor.selectionScale : deck.selectionBounds.y + editor.dragDy
+            width: deck.selectionBounds.w * editor.selectionScale
+            height: deck.selectionBounds.h * editor.selectionScale
             color: "transparent"
             border.color: "#b5f7e9"
             border.width: 1 / editor.canvasScale
             z: 1000
+            Text {
+                x: 12 / editor.canvasScale
+                y: -23 / editor.canvasScale
+                text: (deck.groupedSelection ? "GROUP" : "SELECTION") + " · " + deck.selectionCount + (editor.selectionResizing ? " · " + Math.round(editor.selectionScale * 100) + "%" : "")
+                color: "#b5f7e9"
+                font.pixelSize: 10 / editor.canvasScale
+                font.letterSpacing: 1 / editor.canvasScale
+            }
+            Repeater {
+                model: 4
+                delegate: Rectangle {
+                    id: resizeHandle
+                    required property int index
+                    property bool rightCorner: index % 2 === 1
+                    property bool bottomCorner: index >= 2
+                    objectName: "selectionResize-" + index
+                    width: 10 / editor.canvasScale
+                    height: width
+                    x: (rightCorner ? selectionFrame.width : 0) - width / 2
+                    y: (bottomCorner ? selectionFrame.height : 0) - height / 2
+                    radius: 2 / editor.canvasScale
+                    color: "#d2fff7"
+                    border.color: "#285959"
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -5 / editor.canvasScale
+                        acceptedButtons: Qt.LeftButton
+                        preventStealing: true
+                        cursorShape: resizeHandle.rightCorner === resizeHandle.bottomCorner ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
+                        property point pressAt
+                        property point diagonal
+                        property bool moved: false
+                        onPressed: function (mouse) {
+                            editor.forceActiveFocus();
+                            editor.gestureCanceled = false;
+                            var bounds = deck.selectionBounds;
+                            pressAt = mapToItem(paper, mouse.x, mouse.y);
+                            diagonal = Qt.point(bounds.w * (resizeHandle.rightCorner ? 1 : -1), bounds.h * (resizeHandle.bottomCorner ? 1 : -1));
+                            editor.resizeAnchor = Qt.point(bounds.x + (resizeHandle.rightCorner ? 0 : bounds.w), bounds.y + (resizeHandle.bottomCorner ? 0 : bounds.h));
+                            editor.selectionScale = 1;
+                            editor.selectionResizing = true;
+                            moved = false;
+                        }
+                        onPositionChanged: function (mouse) {
+                            if (!pressed || !editor.selectionResizing)
+                                return;
+                            var point = mapToItem(paper, mouse.x, mouse.y);
+                            var dx = point.x - pressAt.x, dy = point.y - pressAt.y;
+                            if (!moved && Math.hypot(dx, dy) * editor.canvasScale < 3)
+                                return;
+                            moved = true;
+                            var factor = 1 + (dx * diagonal.x + dy * diagonal.y) / (diagonal.x * diagonal.x + diagonal.y * diagonal.y);
+                            editor.selectionScale = deck.constrainSelectionScale(factor, editor.resizeAnchor.x, editor.resizeAnchor.y);
+                        }
+                        onReleased: {
+                            if (!editor.selectionResizing)
+                                return;
+                            var factor = editor.selectionScale;
+                            var anchor = editor.resizeAnchor;
+                            editor.cancelSelectionResize();
+                            deck.scaleSelection(factor, anchor.x, anchor.y);
+                        }
+                        onCanceled: editor.cancelSelectionResize()
+                    }
+                }
+            }
         }
         Rectangle {
             objectName: "selectionRectangle"

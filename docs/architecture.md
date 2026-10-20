@@ -26,11 +26,24 @@ technical rendering. There is no web view and no Python runtime in the app.
 
 ## Data and identity
 
-A version-1 deck stores a title, fixed slide size, and an ordered array of
+A deck stores a title, fixed slide size, and an ordered array of
 slides. Slides contain a UUID, name, background, notes, transition settings,
 and an ordered array of objects. Object IDs are unique within one slide.
 Duplicating a slide preserves its object IDs; duplicating an individual
 object creates a new one. Morph matches equal IDs of the same kind.
+
+Version 2 adds an optional `groups` array to each leaf object, ordered from
+outermost to innermost group ID. Geometry stays in slide coordinates and
+objects retain their layer order and Morph IDs. A group path must have
+consistent ancestors, no repeated IDs, and at most 16 levels; every group
+must contain at least two leaves. Creating or pasting groups upgrades the
+document atomically to v2. Ungrouping removes only the outer path entry.
+Existing v1 documents load without migration until they use groups.
+
+Selection expands any selected member to its whole outer group. Rectangle
+selection uses the union of member bounds. Copy and duplicate remap every
+object ID and group ID consistently; slide duplication preserves them.
+Native grouped clipboard payloads use v2 so older apps reject them.
 
 The transition compiler creates a union of source/target objects once.
 Matching objects interpolate geometry and colors. Unmatched objects fade
@@ -43,6 +56,15 @@ deck. History snapshots retain the whole selection. Rectangle selection uses
 the rotated object's axis-aligned bounds; the rectangle must enclose the
 whole object. Batch edits commit one document snapshot. Drag feedback uses
 shared visual offsets until release, without rebuilding the document per frame.
+
+Collective resizing uses a common positive scale about the opposite corner of
+the selection bounds. Proportional scaling preserves rotated rectangles
+without introducing shear. It transforms leaf positions, dimensions, font
+size, stroke width, corner radius, and Bézier controls. A shared allowable
+scale interval enforces geometry and font limits without distorting the
+selection. QML transforms existing visuals during the gesture; release
+validates and commits one document operation. Escape, selection/document
+changes, or a lost pointer grab cancel the preview.
 
 Reverse presentation playback evaluates the original transition tracks from
 progress 1 to 0. Swapping endpoints would change curved paths and asymmetric
@@ -77,7 +99,7 @@ Fedora hardware before setting frame-rate or memory targets.
 ## Follow-on work
 
 1. Hardware/Wayland validation, accessibility and keyboard focus audit,
-   grouping, distribution, collective resizing, and richer text editing.
+   alignment/distribution between objects, and richer text and group editing.
 2. Click-triggered build sequences, interactive path handles, attached
    connectors, slide master/theme system, and asset deduplication.
 3. Full equation renderer integration, richer chart semantics and language

@@ -8,5 +8,5 @@
   <description><p>A native presentation editor with object-based morph transitions, motion paths, code blocks, equations, charts, tables, and speaker notes.</p></description>
   <launchable type="desktop-id">io.fluxpresent.Flux.desktop</launchable>
   <provides><binary>flux</binary></provides>
-  <releases><release version="0.1.2" date="2026-10-20"/><release version="0.1.1" date="2026-10-19"/><release version="0.1.0" date="2026-10-19"/></releases>
+  <releases><release version="0.2.0" date="2026-10-20"/><release version="0.1.2" date="2026-10-20"/><release version="0.1.1" date="2026-10-19"/><release version="0.1.0" date="2026-10-19"/></releases>
 </component>

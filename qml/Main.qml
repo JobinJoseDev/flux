@@ -172,6 +172,16 @@ ApplicationWindow {
         onActivated: deck.selectAll()
     }
     Shortcut {
+        sequence: "Ctrl+G"
+        enabled: editor.activeFocus && deck.canGroup
+        onActivated: deck.groupSelection()
+    }
+    Shortcut {
+        sequence: "Ctrl+Shift+G"
+        enabled: editor.activeFocus && deck.canUngroup
+        onActivated: deck.ungroupSelection()
+    }
+    Shortcut {
         sequence: "Ctrl+X"
         enabled: editor.activeFocus && !!deck.selectedId
         onActivated: deck.cutObject()
@@ -804,6 +814,18 @@ ApplicationWindow {
             objectName: "contextDuplicateObject"
             action: duplicateObjectAction
         }
+        MenuItem {
+            objectName: "contextGroupSelection"
+            text: "Group    Ctrl+G"
+            enabled: deck.canGroup
+            onTriggered: deck.groupSelection()
+        }
+        MenuItem {
+            objectName: "contextUngroupSelection"
+            text: "Ungroup    Ctrl+Shift+G"
+            enabled: deck.canUngroup
+            onTriggered: deck.ungroupSelection()
+        }
         MenuSeparator {}
         Menu {
             title: "Arrange"
@@ -1271,7 +1293,7 @@ ApplicationWindow {
                 font.pixelSize: 15
                 color: "#ccdde5"
                 background: null
-                text: "START WITH MORPH\nDuplicate a slide (Ctrl+Shift+D), move or resize an object, and press Ctrl+Enter. The scrubber lets you inspect every moment.\n\nEDIT\nDrag on empty canvas to select enclosed objects. Shift/Ctrl-click toggles objects; Ctrl+A selects all. Drag a selected object to move the whole selection. Drag the lower-right handle to resize; hold Shift to preserve proportions. Arrow keys nudge; Shift moves 10 pixels. Double-click to edit content. Right-click objects, slides, or empty canvas for actions. Shift+F10 also opens a menu. Ctrl+X/C/V cuts, copies, and pastes objects while the canvas has focus.\n\nMOTION\nThe Motion inspector sets paths, easing, entrances, delay, and duration. Bézier control points use slide coordinates.\n\nPRESENT\nF5 starts at slide 1; Shift+F5 starts here. Space / Right advances; Left / Page Up or right-click reverses the transition; B blacks out; Escape ends. A second monitor receives the audience view automatically. On one monitor, use File → Show presenter window if needed.\n\nSAVE\nCtrl+S saves a portable .flux project, including images. PDF export contains static slides. Recovery drafts are stored locally.\n\nFlux 0.1.2 · Native C++ and Qt Quick · Fully offline"
+                text: "START WITH MORPH\nDuplicate a slide (Ctrl+Shift+D), move or resize an object, and press Ctrl+Enter. The scrubber lets you inspect every moment.\n\nEDIT\nDrag on empty canvas to select enclosed objects. Shift/Ctrl-click toggles objects; Ctrl+A selects all. Drag a selected object to move the whole selection. For one object, drag the lower-right handle; Shift preserves proportions. For several objects, use any corner handle to resize proportionally. Ctrl+G groups; Ctrl+Shift+G ungroups one level. Escape cancels a group resize. Arrow keys nudge; Shift moves 10 pixels. Double-click to edit content. Right-click objects, slides, or empty canvas for actions. Shift+F10 also opens a menu. Ctrl+X/C/V cuts, copies, and pastes objects while the canvas has focus.\n\nMOTION\nThe Motion inspector sets paths, easing, entrances, delay, and duration. Bézier control points use slide coordinates.\n\nPRESENT\nF5 starts at slide 1; Shift+F5 starts here. Space / Right advances; Left / Page Up or right-click reverses the transition; B blacks out; Escape ends. A second monitor receives the audience view automatically. On one monitor, use File → Show presenter window if needed.\n\nSAVE\nCtrl+S saves a portable .flux project, including images. PDF export contains static slides. Recovery drafts are stored locally.\n\nFlux 0.2.0 · Native C++ and Qt Quick · Fully offline"
             }
         }
     }

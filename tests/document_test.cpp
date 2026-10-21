@@ -397,6 +397,61 @@ class DocumentTest : public QObject {
         d.cleanupRecovery();
         pasted.cleanupRecovery();
     }
+    void individualResizePreviewCommitAndUndo() {
+        Document d;
+        d.addSlide("blank");
+        d.addObjectAt("text", 300, 200);
+        const auto id = d.selectedId();
+        d.updateObject(id, {{"w", 200}, {"h", 120}, {"rotation", 30}, {"fontSize", 24},
+                            {"path", "bezier"}, {"c1x", 80}, {"c1y", 60}});
+        const auto original = d.selected();
+        const auto before = d.json();
+        QSignalSpy changes(&d, &Document::documentChanged);
+        const auto preview = d.previewObjectResize(id, -1, -1, -60, -40, true, false);
+        QVERIFY(!preview.isEmpty());
+        QCOMPARE(d.json(), before);
+        QCOMPARE(changes.size(), 0);
+        d.resizeObject(id, -1, -1, -60, -40, true, false);
+        QCOMPARE(changes.size(), 1);
+        for (auto it = preview.begin(); it != preview.end(); ++it)
+            QCOMPARE(d.selected()[it.key()], it.value());
+        for (const auto& key : original.keys())
+            if (!preview.contains(key))
+                QCOMPARE(d.selected()[key], original[key]);
+        QCOMPARE(d.json()["version"].toInt(), 1);
+        QVERIFY(Document::validate(d.json()));
+        const auto after = d.json();
+        d.undo();
+        QCOMPARE(d.json(), before);
+        QCOMPARE(d.selectedId(), id);
+        d.redo();
+        QCOMPARE(d.json(), after);
+        // No-op, invalid, and stale selection requests must not add history.
+        d.resizeObject(id, 1, 1, 0, 0, true, true);
+        d.resizeObject(id, 0, 0, 30, 30, false, false);
+        d.resizeObject(id, 1, 1, std::numeric_limits<double>::quiet_NaN(), 0, false, false);
+        d.resizeObject("missing", 1, 1, 30, 30, false, false);
+        QCOMPARE(d.json(), after);
+        d.undo();
+        QCOMPARE(d.json(), before);
+        d.resizeObject(id, 0, -1, 0, -20, true, true);
+        const auto centered = d.selected();
+        QVERIFY(std::abs(centered["x"].toDouble() + centered["w"].toDouble() / 2 - 400) < 1e-8);
+        QVERIFY(std::abs(centered["y"].toDouble() + centered["h"].toDouble() / 2 - 260) < 1e-8);
+        QVERIFY(std::abs(centered["w"].toDouble() / centered["h"].toDouble() - 200. / 120.) < 1e-8);
+        d.addObject("rect");
+        d.selectAll();
+        const auto multiple = d.json();
+        QVERIFY(d.previewObjectResize(id, 1, 1, 30, 30, false, false).isEmpty());
+        d.resizeObject(id, 1, 1, 30, 30, false, false);
+        QCOMPARE(d.json(), multiple);
+        d.groupSelection();
+        const auto grouped = d.json();
+        QVERIFY(d.previewObjectResize(id, 1, 1, 30, 30, false, false).isEmpty());
+        d.resizeObject(id, 1, 1, 30, 30, false, false);
+        QCOMPARE(d.json(), grouped);
+        d.cleanupRecovery();
+    }
     void collectiveResizeGeometryUndoAndMorph() {
         Document d;
         d.addSlide("blank");

@@ -67,7 +67,7 @@ updates the executable in `~/.local`; it does not remove your project files.
 
 | Area | Current behavior |
 |---|---|
-| Editing | Drag, resize, Shift-constrained resize, numeric geometry and rotation, keyboard nudge, color, opacity, text size/weight/alignment, layers, alignment, duplicate/delete |
+| Editing | Drag, eight individual resize handles, rotated fixed anchors, Shift aspect lock, Ctrl resize from center, numeric geometry and rotation, keyboard nudge, color, opacity, text size/weight/alignment, layers, alignment, duplicate/delete |
 | Context menus | Right-click objects, slide thumbnails, or empty canvas; keyboard Menu / Shift+F10 also opens the relevant menu |
 | Selection | Drag a rectangle around objects; Shift/Ctrl-click, additive rectangles, Ctrl+A, selection outlines; move, nudge, duplicate, delete and align the whole selection |
 | Groups and resizing | Persistent nested groups; Group/Ungroup menus and shortcuts; four proportional resize handles and numeric width/height for any multi-selection |
@@ -126,6 +126,20 @@ available when exactly one object is selected.
 
 See [docs/rectangle-selection.png](docs/rectangle-selection.png) for the
 native selection UI.
+
+## Individual resizing
+
+Select an ungrouped object to use its eight corner and edge handles. Handles
+follow the object's rotation; the opposite corner or edge midpoint stays fixed.
+Hold **Shift** to lock the original aspect ratio, **Ctrl** to resize from the
+center, or both together. Edge handles normally change only their own axis;
+with Shift, the other dimension grows symmetrically. Sizes stop at the
+existing document limits without flipping the object or moving its anchor.
+
+The preview leaves the document untouched until release, which creates one
+undo step. **Escape**, a lost pointer grab, or a selection/document change
+cancels it. Group and multi-selection resizing remains proportional using
+its four corner handles. No file-format change is required.
 
 ## Groups and proportional resizing
 

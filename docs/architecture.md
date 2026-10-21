@@ -14,6 +14,7 @@ technical rendering. There is no web view and no Python runtime in the app.
 
 | Module | Responsibility |
 |---|---|
+| `src/core/resize.hpp` | Qt-free individual resize geometry with rotated anchors and shared constraints |
 | `src/core/motion.hpp` | Qt-free pose interpolation, easing, cubic paths, timeline normalization |
 | `src/MotionPose.hpp` | Typed QObject pose adapter; scalar properties update existing QML delegates |
 | `src/Document.*` | Document state, slide/object operations, matching, history, local persistence, PDF export |
@@ -56,6 +57,14 @@ deck. History snapshots retain the whole selection. Rectangle selection uses
 the rotated object's axis-aligned bounds; the rectangle must enclose the
 whole object. Batch edits commit one document snapshot. Drag feedback uses
 shared visual offsets until release, without rebuilding the document per frame.
+
+Individual resizing computes geometry from the original node and pointer delta
+in slide coordinates, inverse-rotated into the original object axes. A fixed
+opposite corner/edge midpoint (or Ctrl center) determines the new position.
+Shift uses a common scale; limits constrain the geometry before reconstructing
+the anchored position. QML never maps deltas through a changing local frame.
+The document API recomputes the same geometry on release and adds one history
+entry. Cancellation discards only the preview.
 
 Collective resizing uses a common positive scale about the opposite corner of
 the selection bounds. Proportional scaling preserves rotated rectangles

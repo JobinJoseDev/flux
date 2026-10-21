@@ -67,6 +67,11 @@ class Document final : public QObject {
     Q_INVOKABLE void ungroupSelection();
     Q_INVOKABLE double constrainSelectionScale(double factor, double anchorX, double anchorY) const;
     Q_INVOKABLE void scaleSelection(double factor, double anchorX, double anchorY);
+    Q_INVOKABLE QVariantMap previewObjectResize(const QString& id, int horizontal, int vertical,
+                                                double dx, double dy, bool aspectLock,
+                                                bool fromCenter) const;
+    Q_INVOKABLE void resizeObject(const QString& id, int horizontal, int vertical, double dx,
+                                  double dy, bool aspectLock, bool fromCenter);
     Q_INVOKABLE void addObject(const QString& kind);
     Q_INVOKABLE void addObjectAt(const QString& kind, double x, double y);
     Q_INVOKABLE void updateObject(const QString& id, const QVariantMap& changes);

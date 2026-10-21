@@ -1,4 +1,23 @@
-# Verification for Flux 0.2.0
+# Verification
+
+## Individual resizing (unreleased)
+
+Validated locally on Fedora Linux 44, Qt 6.11.2, C++20, Release, CMake/Ninja.
+The original clean `f439f906` baseline passed its three CTest targets before edits.
+
+All five CTest targets pass after this phase: `motion`, `resize`, `document`,
+`resize-ui`, and the existing `qml-smoke`. The portable resize suite runs
+2,822 checks. The real QML suite covers 96 handle/rotation/modifier combinations,
+three successive pointer moves per gesture, rendered fixed-anchor positions,
+immutable previews, one-step undo/redo, no-op clicks, Escape, lost grab,
+selection/document changes, and preserved collective resizing.
+
+The full run took 14.11 seconds using Qt offscreen/software rendering.
+Real Wayland pointer and GPU behavior remain device checks; headless input
+coverage is not evidence of compositor behavior. No document-format or tag
+changes were made.
+
+## Historical verification for Flux 0.2.0
 
 ## Environment
 

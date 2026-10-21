@@ -1,5 +1,6 @@
 #include "Document.hpp"
 #include "Render.hpp"
+#include "core/resize.hpp"
 #include <QBuffer>
 #include <QClipboard>
 #include <QDir>
@@ -369,6 +370,63 @@ void Document::scaleSelection(double factor, double anchorX, double anchorY) {
     replaceSlide(s);
     changed();
     report("Selection resized · proportions preserved");
+}
+QVariantMap Document::previewObjectResize(const QString& id, int horizontal, int vertical,
+                                          double dx, double dy, bool aspectLock,
+                                          bool fromCenter) const {
+    if (m_selected.size() != 1 || m_selected.first() != id)
+        return {};
+    const auto nodes = selectedObjects();
+    if (nodes.size() != 1)
+        return {};
+    const auto node = nodes.first().toObject();
+    if (!outerGroup(node).isEmpty())
+        return {};
+    const auto result = flux::resizeRect(
+        {node["x"].toDouble(), node["y"].toDouble(), node["w"].toDouble(),
+         node["h"].toDouble(), node["rotation"].toDouble()},
+        horizontal, vertical, dx, dy, aspectLock, fromCenter);
+    if (!result)
+        return {};
+    return {{"x", result->x}, {"y", result->y}, {"w", result->width}, {"h", result->height}};
+}
+void Document::resizeObject(const QString& id, int horizontal, int vertical, double dx, double dy,
+                            bool aspectLock, bool fromCenter) {
+    const auto geometry = previewObjectResize(id, horizontal, vertical, dx, dy, aspectLock,
+                                             fromCenter);
+    if (geometry.isEmpty())
+        return;
+    auto s = slide(m_index);
+    auto nodes = s["objects"].toArray();
+    for (int i = 0; i < nodes.size(); ++i) {
+        auto node = nodes[i].toObject();
+        if (node["id"].toString() != id)
+            continue;
+        auto updated = node;
+        bool different = false;
+        for (auto it = geometry.begin(); it != geometry.end(); ++it) {
+            const double value = it.value().toDouble();
+            different |= std::abs(value - node[it.key()].toDouble()) > 1e-9;
+            updated[it.key()] = value;
+        }
+        if (!different)
+            return;
+        nodes[i] = updated;
+        s["objects"] = nodes;
+        auto candidate = m_doc;
+        auto slides = candidate["slides"].toArray();
+        slides[m_index] = s;
+        candidate["slides"] = slides;
+        QString why;
+        if (!validate(candidate, &why)) {
+            report("Could not resize object: " + why);
+            return;
+        }
+        checkpoint();
+        replaceSlide(s);
+        changed();
+        return;
+    }
 }
 void Document::translateSelection(double dx, double dy) {
     if (m_selected.isEmpty() || !std::isfinite(dx) || !std::isfinite(dy))

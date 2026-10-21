@@ -13,6 +13,9 @@ Item {
     property bool selectionResizing: false
     property real selectionScale: 1
     property point resizeAnchor: Qt.point(0, 0)
+    property bool objectResizing: false
+    property string resizeObjectId: ""
+    property var objectResizeGeometry: ({})
     property bool gestureCanceled: false
     property bool marqueeActive: false
     property point marqueeStart
@@ -32,13 +35,20 @@ Item {
         selectionResizing = false;
         selectionScale = 1;
     }
+    function cancelObjectResize() {
+        objectResizing = false;
+        resizeObjectId = "";
+        objectResizeGeometry = ({});
+    }
     Connections {
         target: deck
         function onDocumentChanged() {
             editor.cancelSelectionResize();
+            editor.cancelObjectResize();
         }
         function onSelectionChanged() {
             editor.cancelSelectionResize();
+            editor.cancelObjectResize();
         }
     }
     function openKeyboardMenu() {
@@ -80,7 +90,9 @@ Item {
             removeRequested();
             event.accepted = true;
         } else if (event.key === Qt.Key_Escape) {
-            if (selectionResizing) {
+            if (objectResizing) {
+                cancelObjectResize();
+            } else if (selectionResizing) {
                 cancelSelectionResize();
             } else if (background.pressed) {
                 gestureCanceled = true;
@@ -177,14 +189,13 @@ Item {
                 id: item
                 objectName: "object-" + modelData.id
                 required property var modelData
-                property real dw: 0
-                property real dh: 0
                 property bool selected: deck.selectedIds.indexOf(modelData.id) >= 0
+                property bool resizing: editor.objectResizing && editor.resizeObjectId === modelData.id
                 property real resizeScale: selected ? editor.selectionScale : 1
-                x: selected && editor.selectionResizing ? editor.resizeAnchor.x + (modelData.x - editor.resizeAnchor.x) * resizeScale : modelData.x + (selected ? editor.dragDx : 0)
-                y: selected && editor.selectionResizing ? editor.resizeAnchor.y + (modelData.y - editor.resizeAnchor.y) * resizeScale : modelData.y + (selected ? editor.dragDy : 0)
-                width: modelData.w * resizeScale + dw
-                height: modelData.h * resizeScale + dh
+                x: resizing ? editor.objectResizeGeometry.x : selected && editor.selectionResizing ? editor.resizeAnchor.x + (modelData.x - editor.resizeAnchor.x) * resizeScale : modelData.x + (selected ? editor.dragDx : 0)
+                y: resizing ? editor.objectResizeGeometry.y : selected && editor.selectionResizing ? editor.resizeAnchor.y + (modelData.y - editor.resizeAnchor.y) * resizeScale : modelData.y + (selected ? editor.dragDy : 0)
+                width: resizing ? editor.objectResizeGeometry.w : modelData.w * resizeScale
+                height: resizing ? editor.objectResizeGeometry.h : modelData.h * resizeScale
                 rotation: modelData.rotation || 0
                 NodeVisual {
                     node: item.modelData
@@ -261,44 +272,83 @@ Item {
                     border.color: "#8edbd3"
                     border.width: 1.5 / editor.canvasScale
                 }
-                Rectangle {
-                    visible: item.selected && deck.selectionCount === 1
-                    x: parent.width - width / 2
-                    y: parent.height - height / 2
-                    width: 10 / editor.canvasScale
-                    height: width
-                    radius: 2 / editor.canvasScale
-                    color: "#d2fff7"
-                    border.color: "#285959"
-                    MouseArea {
-                        anchors.fill: parent
-                        anchors.margins: -5 / editor.canvasScale
-                        cursorShape: Qt.SizeFDiagCursor
-                        property point pressAt
-                        onPressed: function (mouse) {
-                            pressAt = mapToItem(item, mouse.x, mouse.y);
-                        }
-                        onPositionChanged: function (mouse) {
-                            if (!pressed)
-                                return;
-                            var p = mapToItem(item, mouse.x, mouse.y);
-                            var w = Math.max(24, editor.snapped(item.modelData.w + p.x - pressAt.x));
-                            var h = Math.max(24, editor.snapped(item.modelData.h + p.y - pressAt.y));
-                            if (mouse.modifiers & Qt.ShiftModifier)
-                                h = w * item.modelData.h / item.modelData.w;
-                            item.dw = w - item.modelData.w;
-                            item.dh = h - item.modelData.h;
-                        }
-                        onReleased: {
-                            if (item.dw !== 0 || item.dh !== 0)
-                                deck.updateObject(item.modelData.id, {
-                                    w: item.width,
-                                    h: item.height
-                                });
-                        }
-                        onCanceled: {
-                            item.dw = 0;
-                            item.dh = 0;
+                Repeater {
+                    model: item.selected && deck.selectionCount === 1 ? 8 : 0
+                    delegate: Rectangle {
+                        id: objectHandle
+                        required property int index
+                        // Clockwise: NW, N, NE, E, SE, S, SW, W.
+                        property int horizontal: [-1, 0, 1, 1, 1, 0, -1, -1][index]
+                        property int vertical: [-1, -1, -1, 0, 1, 1, 1, 0][index]
+                        property int cursorAxis: ((Math.round((Math.atan2(vertical, horizontal) * 180 / Math.PI + item.rotation) / 45) % 4) + 4) % 4
+                        objectName: "objectResize-" + index
+                        visible: item.selected && deck.selectionCount === 1
+                        x: (horizontal + 1) * item.width / 2 - width / 2
+                        y: (vertical + 1) * item.height / 2 - height / 2
+                        width: 10 / editor.canvasScale
+                        height: width
+                        radius: 2 / editor.canvasScale
+                        color: "#d2fff7"
+                        border.color: "#285959"
+                        MouseArea {
+                            property point pressAt
+                            property point delta: Qt.point(0, 0)
+                            property bool aspectLock: false
+                            property bool fromCenter: false
+                            property bool moved: false
+                            function preview(mouse) {
+                                if (!editor.objectResizing || editor.resizeObjectId !== item.modelData.id)
+                                    return;
+                                // Map through the stable paper, never the changing object's local frame.
+                                var point = mapToItem(paper, mouse.x, mouse.y);
+                                var dx = point.x - pressAt.x, dy = point.y - pressAt.y;
+                                if (!moved && Math.hypot(dx, dy) * editor.canvasScale < 3)
+                                    return;
+                                moved = true;
+                                delta = Qt.point(dx, dy);
+                                aspectLock = !!(mouse.modifiers & Qt.ShiftModifier);
+                                fromCenter = !!(mouse.modifiers & Qt.ControlModifier);
+                                var geometry = deck.previewObjectResize(item.modelData.id, objectHandle.horizontal, objectHandle.vertical, dx, dy, aspectLock, fromCenter);
+                                if (geometry.w !== undefined)
+                                    editor.objectResizeGeometry = geometry;
+                                else
+                                    editor.cancelObjectResize();
+                            }
+                            objectName: "objectResizeInput-" + objectHandle.index
+                            anchors.fill: parent
+                            anchors.margins: -5 / editor.canvasScale
+                            acceptedButtons: Qt.LeftButton
+                            preventStealing: true
+                            cursorShape: [Qt.SizeHorCursor, Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor][objectHandle.cursorAxis]
+                            onPressed: function (mouse) {
+                                editor.forceActiveFocus();
+                                editor.gestureCanceled = false;
+                                pressAt = mapToItem(paper, mouse.x, mouse.y);
+                                delta = Qt.point(0, 0);
+                                moved = false;
+                                editor.resizeObjectId = item.modelData.id;
+                                editor.objectResizeGeometry = item.modelData;
+                                editor.objectResizing = true;
+                            }
+                            onPositionChanged: function (mouse) {
+                                if (pressed)
+                                    preview(mouse);
+                            }
+                            onReleased: function (mouse) {
+                                if (!editor.objectResizing || editor.resizeObjectId !== item.modelData.id)
+                                    return;
+                                preview(mouse);
+                                if (!editor.objectResizing)
+                                    return;
+                                var id = editor.resizeObjectId;
+                                var dx = delta.x, dy = delta.y;
+                                var lock = aspectLock, center = fromCenter;
+                                var commit = moved;
+                                editor.cancelObjectResize();
+                                if (commit)
+                                    deck.resizeObject(id, objectHandle.horizontal, objectHandle.vertical, dx, dy, lock, center);
+                            }
+                            onCanceled: editor.cancelObjectResize()
                         }
                     }
                 }
@@ -376,6 +426,7 @@ Item {
                             var factor = editor.selectionScale;
                             var anchor = editor.resizeAnchor;
                             editor.cancelSelectionResize();
+            editor.cancelObjectResize();
                             deck.scaleSelection(factor, anchor.x, anchor.y);
                         }
                         onCanceled: editor.cancelSelectionResize()

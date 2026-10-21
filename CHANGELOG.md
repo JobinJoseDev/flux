@@ -1,5 +1,14 @@
 # Flux changes
 
+## Unreleased
+
+- Eight corner/edge handles resize individual objects in their rotated axes.
+- Opposite anchors stay fixed; Shift locks aspect ratio and Ctrl holds center.
+- Preview, one-step undo/redo, Escape and lost-grab cancellation cover all handles.
+- Existing proportional group resizing and document formats are preserved.
+- Portable geometry and real QML pointer tests cover rotations, modifiers,
+  size limits, repeated movement, cancellation and history.
+
 ## 0.2.0 — persistent groups and collective resizing
 
 - Group/Ungroup through the right-click menu, inspector, Ctrl+G and Ctrl+Shift+G.

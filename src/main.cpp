@@ -1,6 +1,7 @@
 #include "Document.hpp"
 #include "MotionPose.hpp"
 #include "Render.hpp"
+#include "TextMorph.hpp"
 #include "SmokeTest.hpp"
 #include <QCommandLineParser>
 #include <QDir>
@@ -29,6 +30,8 @@ int main(int argc, char* argv[]) {
     parser.process(app);
     qmlRegisterType<MotionPose>("Flux.Native", 1, 0, "MotionPose");
     qmlRegisterType<ContentItem>("Flux.Native", 1, 0, "ContentItem");
+    qmlRegisterType<TextItem>("Flux.Native", 1, 0, "TextItem");
+    qmlRegisterType<TextMorphItem>("Flux.Native", 1, 0, "TextMorphItem");
     Document document;
     if (!parser.positionalArguments().isEmpty())
         document.open(QUrl::fromLocalFile(

@@ -11,6 +11,7 @@ class MotionPose : public QObject {
     Q_PROPERTY(QVariantMap from READ from WRITE setFrom NOTIFY inputChanged)
     Q_PROPERTY(QVariantMap to READ to WRITE setTo NOTIFY inputChanged)
     Q_PROPERTY(double progress READ progress WRITE setProgress NOTIFY changed)
+    Q_PROPERTY(double easedProgress READ easedProgress NOTIFY changed)
     Q_PROPERTY(QPointF position READ position NOTIFY changed)
     Q_PROPERTY(QSizeF extent READ extent NOTIFY changed)
     Q_PROPERTY(double angle READ angle NOTIFY changed)
@@ -34,6 +35,7 @@ class MotionPose : public QObject {
         update();
     }
     double progress() const { return m_progress; }
+    double easedProgress() const { return m_easedProgress; }
     void setProgress(double v) {
         m_progress = flux::unit(v);
         update();
@@ -52,6 +54,7 @@ class MotionPose : public QObject {
     QVariantMap m_from, m_to;
     flux::Pose m_a, m_b, m_pose;
     double m_progress{};
+    double m_easedProgress{};
     static QColor encode(flux::Color c) { return QColor::fromRgbF(c.r, c.g, c.b, c.a); }
     static flux::Color color(const QVariant& v) {
         QColor c(v.toString());
@@ -80,7 +83,8 @@ class MotionPose : public QObject {
             e = flux::Ease::Linear;
         if (m_to.value("easing") == "out")
             e = flux::Ease::CubicOut;
-        m_pose = flux::interpolate(m_a, m_b, flux::ease(m_progress, e), path,
+        m_easedProgress = flux::ease(m_progress, e);
+        m_pose = flux::interpolate(m_a, m_b, m_easedProgress, path,
                                    {m_to.value("c1x", m_a.position.x).toDouble(),
                                     m_to.value("c1y", m_a.position.y - 160).toDouble()},
                                    {m_to.value("c2x", m_b.position.x).toDouble(),

@@ -1,5 +1,35 @@
 # Verification
 
+## Spatial unchanged-text Morph (unreleased)
+
+A clean Release build in `build-verify` passes all seven CTest targets on
+Fedora 44 with GCC 16.2.1, Qt 6.11.2 and Ninja: `motion`, `resize`, `document`,
+`resize-ui`, `text-morph`, `morph-ui`, and the existing `qml-smoke`.
+
+The text suite reports 25 passes including setup/cleanup. It covers default
+Fedora variable-font regular/bold shaping, font size, wrapping, alignment,
+clipping and hidden glyphs, ligature changes, combining marks, Arabic/bidi,
+Indic text, emoji sequences, explicit line separators, long-text fallback,
+unchanged-fallback opacity, stateless reverse seeking, bounded textures and
+cache shutdown on sequential painting threads. The texture/thread checks also
+pass with `QT_SCALE_FACTOR=2`.
+
+The real QML suite reports 8 passes including setup/cleanup. Framebuffer
+comparisons verify that transition endpoints match static slides exactly,
+revisiting a progress value produces the same image, and text uses the pose's
+asymmetric easing. It checks interpolated clipping, changed-text crossfades
+and existing entrance behavior. The existing smoke test continues to cover
+live presentation direction changes and progress continuity. Captured editor
+and transition frames were visually inspected.
+
+Review corrected default variable-font rejection, phantom whitespace metrics,
+same-layout fallback dimming, oversized texture allocation and font-cache
+thread ownership before commit. The document format and historical tags are
+unchanged. Qt 6.5 API compatibility was reviewed, but the runtime validation
+here used Qt 6.11.2. Real GPU/Wayland frame times and compositor behavior remain
+device checks; software/offscreen and worker-thread tests do not establish
+hardware rendering performance.
+
 ## Individual resizing (unreleased)
 
 Validated locally on Fedora Linux 44, Qt 6.11.2, C++20, Release, CMake/Ninja.

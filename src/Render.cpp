@@ -1,4 +1,5 @@
 #include "Render.hpp"
+#include "TextLayout.hpp"
 #include <QBuffer>
 #include <QFontMetricsF>
 #include <QImage>
@@ -289,13 +290,7 @@ void Render::content(QPainter& p, const QJsonObject& n) {
             box.draw(p, 0, 0);
         }
     } else if (kind == "text") {
-        p.setFont(font(n.value("fontSize").toDouble(40), false, n.value("bold").toBool()));
-        int flags = Qt::TextWordWrap | Qt::AlignTop;
-        QString align = n.value("align").toString();
-        flags |= align == "center"  ? Qt::AlignHCenter
-                 : align == "right" ? Qt::AlignRight
-                                    : Qt::AlignLeft;
-        p.drawText(r, flags, n.value("text").toString());
+        FluxText::Layout(n.toVariantMap()).draw(p, color(n, "color", "#edf3f2"));
     } else if (kind == "image") {
         QString src = n.value("source").toString();
         int comma = src.indexOf(',');

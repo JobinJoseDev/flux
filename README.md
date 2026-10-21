@@ -73,7 +73,7 @@ updates the executable in `~/.local`; it does not remove your project files.
 | Groups and resizing | Persistent nested groups; Group/Ungroup menus and shortcuts; four proportional resize handles and numeric width/height for any multi-selection |
 | Clipboard | Cut/copy/paste native selections, including embedded images, across slides or Flux windows; paste external plain text as a text box |
 | Slide management | Add, duplicate, delete, reorder; 6 layouts including a blank canvas |
-| Morph | Stable IDs, position/size/rotation/color/opacity interpolation, text/content crossfades, appearing/disappearing objects |
+| Morph | Stable IDs, position/size/rotation/color/opacity interpolation, spatial unchanged-text layouts, safe content crossfades, appearing/disappearing objects |
 | Paths | Straight, curved arc, cubic Bézier; smooth, linear, and ease-out timing |
 | Entrances | Fade, rise, zoom, path; per-object delay and duration; timed playback after slide transitions |
 | Technical content | Editable highlighted code; bounded offline TeX subset; editable bar/line charts and tab-separated tables |
@@ -170,6 +170,25 @@ later to reopen. Ungrouping does not downgrade the file. Decks that have never
 used groups remain version 1. This prevents older apps from silently editing
 a grouped deck without understanding its structure.
 
+## Spatial text Morph
+
+Duplicate a slide to retain object IDs, then change a text box's size, font
+size, alignment, position, or rotation. If the text is unchanged, Morph moves
+its Qt-shaped glyphs between the two layouts, including words that wrap onto
+different lines. Text is clipped to the interpolated box, and font size uses
+the same easing as object geometry. Scrubbing and reverse playback evaluate
+the same transition at the same progress.
+
+The static editor, slide views, transition endpoints, and PDF export share
+Qt's text layout. Ligatures, combining marks, right-to-left scripts, and font
+fallback are shaped as complete text. When endpoint glyph correspondence is
+ambiguous or unsupported, the complete layouts crossfade safely. Changed
+text still crossfades; changed-word/grapheme Morph and explicit object
+correspondence are later work. Existing stable object IDs and `.flux` formats
+are unchanged. Optical-size/color/bitmap fonts, ambiguous shaping, and very
+large glyph sets use the safe fallback. Large text boxes may be downsampled
+to keep their painted textures bounded.
+
 ## Going backward in a presentation
 
 **Left**, **Page Up**, and right-click now reverse the same transition used
@@ -198,9 +217,10 @@ explicitly bypassed backward transitions. No enable switch is needed.
   to shapes.
 - Chart data uses `label,value` per line (not general CSV), up to 32 points.
   Tables use tab-separated cells and newline-separated rows, up to 40 × 16.
-- Morph resizes visual content with transforms; complex chart/table/text
-  changes crossfade. It does not semantically morph individual letters or
-  individual chart points. Different object kinds crossfade.
+- Unchanged text uses spatial layout Morph where Qt's shaped glyphs match.
+  Changed text, unsupported text shaping, complex chart/table changes, and
+  different object kinds crossfade. Semantic changed-word/grapheme Morph and
+  individual chart-point Morph are not implemented.
 - Object entrances are time-based after a slide transition; per-click build
   sequencing is future work. Selecting **Cut** skips the slide transition.
 - Only 16:9 / 1280 × 720 documents are supported in this version.
@@ -232,9 +252,10 @@ See [docs/architecture.md](docs/architecture.md) and
 The runtime is C++ and Qt Quick. QML defines the interface and scene;
 C++ owns document operations, persistence, geometry interpolation, technical
 content rendering, and PDF output. The motion core has no Qt dependency.
-Shapes and text use Qt Quick scene-graph items. Technical items paint into
-Qt Quick textures when their content changes; transitions transform those
-items without repainting their contents on every animation frame.
+Shapes use Qt Quick scene-graph items. Text uses cached Qt-shaped layouts and
+bounded painted textures; spatial text Morph repaints interpolated glyphs.
+Technical items paint into Qt Quick textures when their content changes;
+transitions transform those items without repainting every animation frame.
 
 The included CI workflow builds and tests on Fedora when the source is
 pushed to your own GitHub repository. No repository is created automatically.

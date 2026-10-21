@@ -18,6 +18,7 @@ Rectangle {
         delegate: Item {
             id: object
             required property var modelData
+            property bool spatialText: !stage.builds && !!modelData.spatialText
             MotionPose {
                 id: pose
                 from: object.modelData.from
@@ -30,7 +31,16 @@ Rectangle {
             height: pose.extent.height
             rotation: pose.angle
             opacity: pose.alpha
+            TextMorphItem {
+                anchors.fill: parent
+                visible: object.spatialText
+                from: object.modelData.from
+                to: object.modelData.to
+                progress: pose.easedProgress
+                inkColor: pose.ink
+            }
             NodeVisual {
+                visible: !object.spatialText
                 node: object.modelData.to
                 fillColor: pose.fill
                 inkColor: pose.ink
@@ -41,7 +51,7 @@ Rectangle {
                 }
             }
             NodeVisual {
-                visible: object.modelData.crossfade
+                visible: !object.spatialText && object.modelData.crossfade
                 node: object.modelData.from
                 fillColor: pose.fill
                 inkColor: pose.ink

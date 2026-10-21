@@ -18,8 +18,10 @@ technical rendering. There is no web view and no Python runtime in the app.
 | `src/core/motion.hpp` | Qt-free pose interpolation, easing, cubic paths, timeline normalization |
 | `src/MotionPose.hpp` | Typed QObject pose adapter; scalar properties update existing QML delegates |
 | `src/Document.*` | Document state, slide/object operations, matching, history, local persistence, PDF export |
+| `src/TextLayout.*` | Qt-shaped endpoint layouts, conservative glyph correspondence and spatial text interpolation |
+| `src/TextMorph.*` | Shared static/moving text paint items and bounded texture rendering |
 | `src/Render.*` | Shared content/PDF painter, code formatting, bounded formula layout, charts and tables |
-| `qml/NodeVisual.qml` | Native text/shape/image items; technical texture item |
+| `qml/NodeVisual.qml` | Native shape/image items and shared text/technical paint items |
 | `qml/MotionStage.qml` | Persistent delegate per transition track; no per-frame model replacement |
 | `qml/EditCanvas.qml` | Local drag/resize feedback, one document operation at gesture completion |
 | `qml/Presentation.qml` | Audience playback and timed entrance sequence |
@@ -48,7 +50,16 @@ Native grouped clipboard payloads use v2 so older apps reject them.
 
 The transition compiler creates a union of source/target objects once.
 Matching objects interpolate geometry and colors. Unmatched objects fade
-in or out. Content changes crossfade. The interpolator uses the shortest
+in or out. Unchanged text tracks use a pair of complete `QTextLayout` endpoints. Matching
+Qt cluster indexes, actual font faces, glyph IDs and run flags identify safe
+spatial correspondence; text is never sliced to shape individual code units.
+Glyph baselines and raw-font sizes interpolate at the same eased scalar as
+the object pose. The interpolated box clips paint, while full endpoint layouts
+retain glyphs hidden by clipping. Ambiguous/unsupported shaping falls back to
+complete-layout crossfades. Static text and PDF export share the endpoint
+layout implementation. Entrance builds retain their existing scaling behavior.
+
+Content changes crossfade. The interpolator uses the shortest
 rotation across the 0/360-degree seam. Bézier paths operate on the object's
 top-left position in document coordinates.
 
@@ -94,6 +105,14 @@ assets by content hash and store them in an archive next to document JSON.
 - The pure C++ interpolation path does not allocate memory.
 - Dragging/resizing is visual until the gesture ends, then becomes one undo
   action and one autosave scheduling event.
+- Spatial text caches endpoint shaping and correspondence; seeking/reversal
+  only changes progress. Its painted glyph texture updates during animation.
+  Static text repaints only when inputs or geometry change. Both text paint
+  items limit textures to 2,048 pixels per edge and 1,048,576 pixels total,
+  accounting for device pixel ratio; oversized boxes are downsampled.
+  Separate per-thread LRU caches retain at most 64 layouts/plans and 32,768
+  glyphs each. Fonts are constructed and released on their painting thread,
+  including thread shutdown; GUI items own only value inputs.
 - Technical content is painted into a Qt Quick texture. During Morph the
   texture is transformed at its original dimensions; it is not repainted
   for every interpolated width/height.
@@ -118,6 +137,11 @@ Fedora hardware before setting frame-rate or memory targets.
 5. Reproducible Flatpak/RPM release pipeline after Fedora hardware validation.
 
 ## Primary references
+
+- Qt text shaping and layout: https://doc.qt.io/qt-6/qtextlayout.html
+- Shaped glyph indexes and positions: https://doc.qt.io/qt-6/qglyphrun.html
+- Raw font thread ownership: https://doc.qt.io/qt-6/qrawfont.html
+- Painted item texture sizing: https://doc.qt.io/qt-6/qquickpainteditem.html
 
 - Qt Quick scene graph: https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html
 - QML/CMake modules: https://doc.qt.io/qt-6/qt-add-qml-module.html

@@ -52,6 +52,34 @@ class DocumentTest : public QObject {
         d.unlinkObject();
         QCOMPARE(d.morphTracks(1).size(), count + 1);
     }
+    void unchangedTextTracks() {
+        Document d;
+        d.newDeck(false);
+        d.addSlide("blank");
+        d.addObject("text");
+        const auto id = d.selectedId();
+        const QString text = QString::fromUtf8("Office é العربية 👩‍👩‍👧‍👦\nSame text");
+        d.updateObject(id, {{"text", text}, {"fontSize", 24}, {"w", 600}, {"h", 180}});
+        const auto original = d.selected();
+        const auto version = d.json().value("version");
+        d.duplicateSlide();
+        d.updateObject(id, {{"fontSize", 48}, {"w", 240}, {"h", 72}, {"align", "right"}});
+        const auto track = d.morphTracks(d.slideIndex()).first().toMap();
+        QVERIFY(track["spatialText"].toBool());
+        QVERIFY(!track["crossfade"].toBool());
+        QCOMPARE(track["from"].toMap(), original);
+        QCOMPARE(track["to"].toMap()["text"].toString(), text);
+        QCOMPARE(d.json()["version"], version);
+        const auto before = d.json();
+        d.updateObject(id, {{"text", text + " changed"}});
+        const auto changed = d.morphTracks(d.slideIndex()).first().toMap();
+        QVERIFY(!changed["spatialText"].toBool());
+        QVERIFY(changed["crossfade"].toBool());
+        d.undo();
+        QCOMPARE(d.json(), before);
+        QCOMPARE(d.morphTracks(d.slideIndex()).first().toMap(), track);
+        d.cleanupRecovery();
+    }
     void persistenceAndValidation() {
         QTemporaryDir tmp;
         QVERIFY(tmp.isValid());

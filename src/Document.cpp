@@ -77,6 +77,8 @@ QVariantMap track(QJsonObject a, QJsonObject b, double delay = 0, double duratio
             {"to", b.toVariantMap()},
             {"delay", delay},
             {"duration", duration},
+            {"spatialText", a.value("kind") == "text" && b.value("kind") == "text" &&
+                                a.value("text") == b.value("text")},
             {"crossfade", a.value("text") != b.value("text") ||
                               a.value("source") != b.value("source") ||
                               a.value("chartStyle") != b.value("chartStyle")}};

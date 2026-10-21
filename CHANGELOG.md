@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Unchanged text Morph interpolates Qt-shaped glyph positions and font size
+  between wrapped/aligned/clipped endpoint layouts, using the pose's easing.
+- Static text and PDF export share the same shaping and layout implementation.
+- Ambiguous shaping and changed text retain complete-layout crossfades.
+- Reverse playback and seeking reuse the same endpoint plan and progress.
+- No native document-format changes. Changed-word/grapheme Morph and explicit
+  object correspondence remain later work.
+
 - Eight corner/edge handles resize individual objects in their rotated axes.
 - Opposite anchors stay fixed; Shift locks aspect ratio and Ctrl holds center.
 - Preview, one-step undo/redo, Escape and lost-grab cancellation cover all handles.

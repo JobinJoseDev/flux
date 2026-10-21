@@ -14,16 +14,9 @@ Item {
     }
     Component {
         id: textItem
-        Text {
-            text: visual.node.text || ""
-            color: visual.inkColor
-            font.family: "sans-serif"
-            font.pixelSize: visual.node.fontSize || 40
-            font.bold: visual.node.bold || false
-            wrapMode: Text.Wrap
-            textFormat: Text.PlainText
-            horizontalAlignment: visual.node.align === "center" ? Text.AlignHCenter : visual.node.align === "right" ? Text.AlignRight : Text.AlignLeft
-            clip: true
+        TextItem {
+            node: visual.node
+            inkColor: visual.inkColor
         }
     }
     Component {

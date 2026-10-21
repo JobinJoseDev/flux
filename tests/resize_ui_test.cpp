@@ -1,6 +1,7 @@
 #include "Document.hpp"
 #include "MotionPose.hpp"
 #include "Render.hpp"
+#include "TextMorph.hpp"
 #include <QGuiApplication>
 #include <QJsonObject>
 #include <QMouseEvent>
@@ -73,6 +74,8 @@ class ResizeUiTest : public QObject {
         QStandardPaths::setTestModeEnabled(true);
         qmlRegisterType<MotionPose>("Flux.Native", 1, 0, "MotionPose");
         qmlRegisterType<ContentItem>("Flux.Native", 1, 0, "ContentItem");
+        qmlRegisterType<TextItem>("Flux.Native", 1, 0, "TextItem");
+        qmlRegisterType<TextMorphItem>("Flux.Native", 1, 0, "TextMorphItem");
     }
     void init() {
         warnings.clear();
